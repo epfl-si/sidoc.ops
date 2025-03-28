@@ -1,0 +1,13 @@
+- name: cluster
+  hosts: all
+  roles:
+      - role: roles/cluster
+  tags:
+      - cluster
+
+- name: outline
+  hosts: all
+  roles:
+      - role: roles/outline
+  tags:
+      - outline
