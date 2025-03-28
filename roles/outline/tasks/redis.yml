@@ -53,8 +53,6 @@
                 image: quay-its.epfl.ch/svc0176/redis:8.0-M04
                 ports:
                   - containerPort: 6379
-                imagePullSecrets:
-                  - name: svc0176-pull-secret
                 resources:
                   requests:
                     cpu: "50m"
@@ -66,7 +64,7 @@
                   - name: redis-data
                     mountPath: /data
             imagePullSecrets:
-              - name: svc0176-pull-secret
+              - name: "{{ pull_secret_name }}"
             volumes:
               - name: redis-data
                 persistentVolumeClaim:

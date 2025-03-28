@@ -130,4 +130,4 @@
                                 - name: yarn-cache
                                   mountPath: /tmp/.yarn-cache
                       imagePullSecrets:
-                          - name: svc0176-pull-secret
+                          - name: "{{ pull_secret_name }}"
