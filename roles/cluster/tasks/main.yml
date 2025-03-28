@@ -1,0 +1,14 @@
+- name: Deploy NFS
+  include_tasks: nfs.yml
+  tags:
+    - cluster.nfs
+
+- name: Deploy PostgreSQL
+  include_tasks: postgres.yml
+  tags:
+    - cluster.postgres
+
+- name: Deploy Secrets
+  include_tasks: secrets.yml
+  tags:
+    - cluster.secrets

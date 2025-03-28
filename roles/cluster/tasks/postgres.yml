@@ -1,0 +1,82 @@
+- name: Generate random username
+  ansible.builtin.set_fact:
+      postgres_user: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=20') }}"
+
+- name: Generate random password
+  ansible.builtin.set_fact:
+      postgres_password: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=64') }}"
+
+- name: Encode credentials in base64
+  ansible.builtin.set_fact:
+      postgres_user_b64: "{{ postgres_user | b64encode }}"
+      postgres_password_b64: "{{ postgres_password | b64encode }}"
+
+- name: Check if the PostgreSQL cluster already exists
+  kubernetes.core.k8s_info:
+      api_version: postgresql.cnpg.io/v1
+      kind: Cluster
+      name: postgres-cluster
+      namespace: "{{ openshift_namespace }}"
+  register: postgres_cluster_info
+
+- name: Create PostgreSQL secret with random credentials
+  kubernetes.core.k8s:
+      state: present
+      definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+              name: "postgres-cluster-root"
+              namespace: "{{ openshift_namespace }}"
+          type: Opaque
+          data:
+              username: "{{ postgres_user_b64 }}"
+              password: "{{ postgres_password_b64 }}"
+  when: postgres_cluster_info.resources | length == 0
+
+- name: Deploy PostgreSQL cluster
+  kubernetes.core.k8s:
+      state: present
+      definition:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          metadata:
+              name: postgres-cluster
+              namespace: "{{ openshift_namespace }}"
+          spec:
+              instances: 2
+              storage:
+                  size: "10Gi"
+                  storageClass: "{{ storage_class_name }}"
+              superuserSecret:
+                  name: postgres-cluster-root
+              resources:
+                  requests:
+                      cpu: "500m"
+                      memory: "1Gi"
+              managed:
+                  roles:
+                      - name: outlinewiki-user
+                        ensure: present
+                        login: true
+                        superuser: false
+                        passwordSecret:
+                            name: outlinewiki-db-credentials
+  when: postgres_cluster_info.resources | length == 0
+
+- name: Deploy PostgreSQL service
+  kubernetes.core.k8s:
+      state: present
+      definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+              name: postgres-cluster
+              namespace: "{{ openshift_namespace }}"
+          spec:
+              selector:
+                  cnpg.io/cluster: postgres-cluster
+              ports:
+                  - protocol: TCP
+                    port: 5432
+                    targetPort: 5432
