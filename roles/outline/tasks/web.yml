@@ -1,0 +1,133 @@
+- name: Create wiki service
+  kubernetes.core.k8s:
+      definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+              name: "{{ app }}"
+              namespace: "{{ openshift_namespace }}"
+          spec:
+              selector:
+                  app: "{{ app }}"
+              ports:
+                  - name: "{{ app }}-svc-port"
+                    protocol: TCP
+                    port: 80
+                    targetPort: 3000
+
+- name: Create wiki Ingress
+  kubernetes.core.k8s:
+      definition:
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+              name: "{{ app }}"
+              namespace: "{{ openshift_namespace }}"
+              labels:
+                  app: "{{ app }}"
+                  route: public
+              annotations:
+                  nginx.ingress.kubernetes.io/rewrite-target: /
+                  kubernetes.io/ingress.class: nginx
+                  nginx.ingress.kubernetes.io/ssl-redirect: "true"
+          spec:
+              rules:
+                  - host: "{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}"
+                    http:
+                        paths:
+                            - path: /
+                              pathType: Prefix
+                              backend:
+                                  service:
+                                      name: "{{ app }}"
+                                      port:
+                                          number: 80
+
+- name: Create wiki Route
+  kubernetes.core.k8s:
+      definition:
+          apiVersion: route.openshift.io/v1
+          kind: Route
+          metadata:
+              name: "{{ app }}"
+              namespace: "{{ openshift_namespace }}"
+              labels:
+                  app: "{{ app }}"
+                  route: public
+          spec:
+              host: "{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}"
+              to:
+                  kind: Service
+                  name: "{{ app }}"
+              port:
+                  targetPort: "{{ app }}-svc-port"
+              tls:
+                  termination: edge
+                  insecureEdgeTerminationPolicy: Redirect
+
+- name: Create Deployment
+  kubernetes.core.k8s:
+      definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+              name: "{{ app }}"
+              namespace: "{{ openshift_namespace }}"
+          spec:
+              replicas: 1
+              strategy:
+                  type: RollingUpdate
+                  rollingUpdate:
+                      maxUnavailable: 1
+              selector:
+                  matchLabels:
+                      app: "{{ app }}"
+              template:
+                  metadata:
+                      labels:
+                          app: "{{ app }}"
+                  spec:
+                      volumes:
+                          - name: yarn-cache
+                            emptyDir: {}
+                      containers:
+                          - image: "{{ registry }}/{{ organisation }}/{{ image }}:{{ version }}"
+                            imagePullPolicy: Always
+                            name: "{{ app }}"
+                            ports:
+                                - containerPort: 3000
+                            env:
+                                - name: YARN_CACHE_FOLDER
+                                  value: /tmp/.yarn-cache
+                                - name: URL
+                                  value: "https://{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}"
+                                - name: COLLABORATION_URL
+                                  value: "https://{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}/collaboration"
+                            envFrom:
+                                - secretRef:
+                                      name: "{{ app }}-secrets"
+                            command: ["/bin/sh", "-c"]
+                            args:
+                                - yarn start
+                            resources:
+                                requests:
+                                    cpu: 100m
+                                    memory: 512Mi
+                                limits:
+                                    cpu: 500m
+                                    memory: 1024Mi
+                            readinessProbe:
+                                tcpSocket:
+                                    port: 3000
+                                initialDelaySeconds: 5
+                                timeoutSeconds: 3
+                            livenessProbe:
+                                tcpSocket:
+                                    port: 3000
+                                initialDelaySeconds: 5
+                                timeoutSeconds: 3
+                            volumeMounts:
+                                - name: yarn-cache
+                                  mountPath: /tmp/.yarn-cache
+                      imagePullSecrets:
+                          - name: svc0176-pull-secret

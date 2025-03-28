@@ -1,0 +1,9 @@
+registry: quay-its.epfl.ch
+organisation: svc0176
+image: outlinewiki
+version: 0.82.0
+app: outlinewiki
+subdomain: collab
+db_host: postgres-cluster-rw
+
+secrets: "{{ lookup('pipe', 'keybase fs read /keybase/team/epfl_wiki/secrets/outline.yml') | from_yaml }}"

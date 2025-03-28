@@ -1,0 +1,29 @@
+- name: Retrieve Database Credentials
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ openshift_namespace }}"
+    name: "{{ app }}-db-credentials"
+  register: db_secret
+
+- name: Set Database Variables
+  ansible.builtin.set_fact:
+    db:
+      name: "{{ db_secret.resources[0].data.database | b64decode }}"
+      user: "{{ db_secret.resources[0].data.username | b64decode }}"
+
+- name: Create Database in PostgreSQL Cluster
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: postgresql.cnpg.io/v1
+      kind: Database
+      metadata:
+        name: "{{ app }}"
+        namespace: "{{ openshift_namespace }}"
+      spec:
+        cluster:
+          name: postgres-cluster
+        name: "{{ db.name }}"
+        owner: "{{ db.user }}"
+        passwordSecret:
+          name: "{{ app }}-db-credentials"

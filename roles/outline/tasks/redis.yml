@@ -1,0 +1,73 @@
+- name: Create redis service
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: "{{ app }}-redis"
+        namespace: "{{ openshift_namespace }}"
+      spec:
+        selector:
+          app: "{{ app }}-redis"
+        ports:
+          - name: "{{ app }}-redis-svc-port"
+            protocol: TCP
+            port: 6379
+            targetPort: 6379
+
+- name: Create redis PVC
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: "{{ app }}-redis-data"
+        namespace: "{{ openshift_namespace }}"
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+
+- name: Create Redis deployment
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: "{{ app }}-redis"
+        namespace: "{{ openshift_namespace }}"
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: "{{ app }}-redis"
+        template:
+          metadata:
+            labels:
+              app: "{{ app }}-redis"
+          spec:
+            containers:
+              - name: redis
+                image: quay-its.epfl.ch/svc0176/redis:8.0-M04
+                ports:
+                  - containerPort: 6379
+                imagePullSecrets:
+                  - name: svc0176-pull-secret
+                resources:
+                  requests:
+                    cpu: "50m"
+                    memory: "50Mi"
+                  limits:
+                    cpu: "100m"
+                    memory: "100Mi"
+                volumeMounts:
+                  - name: redis-data
+                    mountPath: /data
+            imagePullSecrets:
+              - name: svc0176-pull-secret
+            volumes:
+              - name: redis-data
+                persistentVolumeClaim:
+                  claimName: "{{ app }}-redis-data"
