@@ -6,4 +6,6 @@ app: outlinewiki
 subdomain: collab
 db_host: postgres-cluster-rw
 
+git_repo_url: https://github.com/epfl-si/wiki.ops
+
 secrets: "{{ lookup('pipe', 'keybase fs read /keybase/team/epfl_wiki/secrets/outline.yml') | from_yaml }}"
