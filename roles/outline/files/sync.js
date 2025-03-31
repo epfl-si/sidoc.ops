@@ -81,40 +81,17 @@ class OutlineSync {
 
 	async getUserUnits(email) {
 		try {
-			// uncomment this when service can read from person
-			// const personResponse = await this.epflClient.get(`/person?email=${email}`);
-			const sciper = 12345; //personResponse.data?.sciper;
+			const personResponse = await this.epflClient.get(`/person/${email}`);
+			console.log('Person response:', personResponse.data);
+			const sciper = personResponse.data?.sciper;
 
 			if (!sciper) {
 				logger.warn(`No SCIPER found for email: ${email}`);
 				return [];
 			}
 
-			// remove this when service can read from accred
-			const hashCode = (str) => {
-				return str.split('').reduce((prevHash, currVal) => (prevHash << 5) - prevHash + currVal.charCodeAt(0), 0);
-			};
-
-			const emailHash = Math.abs(hashCode(email));
-			const units = [
-				{
-					name: 'ISAS-FSD',
-					id: 123,
-				},
-				{
-					name: 'ISAS-GIF',
-					id: 456,
-				},
-				{
-					name: 'ITOP-MWS',
-					id: 789,
-				},
-			];
-
-			const selectedUnits = units.filter((_, index) => (emailHash + index) % 2 === 0);
-			const unitsResponse = { data: selectedUnits };
-
-			//await this.epflClient.get(`/units?persid=${sciper}`);
+			const units = await this.epflClient.get(`/units?persid=${sciper}`);
+			console.log('Units response:', units.data);
 
 			logger.info('Units retrieved successfully', {
 				email,
