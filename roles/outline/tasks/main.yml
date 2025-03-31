@@ -1,19 +1,24 @@
 - name: Generate or Retrieve Secrets
   include_tasks: secrets.yml
   tags:
-      - outline.secrets
+    - outline.secrets
 
 - name: Deploy PostgreSQL
   include_tasks: postgres.yml
   tags:
-      - outline.postgres
+    - outline.postgres
 
 - name: Deploy Redis
   include_tasks: redis.yml
   tags:
-      - outline.redis
+    - outline.redis
 
 - name: Deploy Web Application
   include_tasks: web.yml
   tags:
-      - outline.web
+    - outline.web
+
+- name: Deploy the syncer
+  include_tasks: syncer.yml
+  tags:
+    - outline.syncer
