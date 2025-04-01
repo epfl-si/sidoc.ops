@@ -117,8 +117,8 @@ class OutlineSync {
 	 */
 	async getUserUnits(email) {
 		// Get SCIPER from email
-		const personResponse = await this.epflClient.get(`/person/${email}`);
-		const sciper = personResponse?.data?.sciper;
+		const personResponse = await this.epflClient.get(`/persons/${email}`);
+		const sciper = personResponse?.data.id;
 
 		if (!sciper) {
 			logger.warn(`No SCIPER found for email: ${email}`);
@@ -131,10 +131,10 @@ class OutlineSync {
 		logger.info('Units retrieved successfully', {
 			email,
 			sciper,
-			totalUnits: unitsResponse.data.length,
+			totalUnits: unitsResponse.data.count,
 		});
 
-		return unitsResponse.data;
+		return unitsResponse.data.units;
 	}
 
 	/**
