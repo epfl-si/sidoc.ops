@@ -8,6 +8,16 @@
               name: postgres-cluster
               namespace: "{{ openshift_namespace }}"
           spec:
+              backup:
+                  barmanObjectStore:
+                      destinationPath: "s3://{{ secrets[env].s3.url }}/{{ secrets[env].s3.name }}/postgresql-backup"
+                      s3Credentials:
+                          accessKeyId:
+                              name: s3-credentials
+                              key: ACCESS_KEY_ID
+                          secretAccessKey:
+                              name: s3-credentials
+                              key: ACCESS_SECRET_KEY
               instances: 2
               storage:
                   size: "10Gi"
