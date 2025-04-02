@@ -193,6 +193,26 @@
                                   value: "https://{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}"
                                 - name: COLLABORATION_URL
                                   value: "https://{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}/collaboration"
+                                - name: AWS_S3_UPLOAD_BUCKET_NAME
+                                  valueFrom:
+                                      secretKeyRef:
+                                          name: "s3-credentials"
+                                          key: "AWS_BUCKET_NAME"
+                                - name: AWS_S3_UPLOAD_BUCKET_URL
+                                  valueFrom:
+                                      secretKeyRef:
+                                          name: "s3-credentials"
+                                          key: "AWS_BUCKET_URL"
+                                - name: AWS_ACCESS_KEY_ID
+                                  valueFrom:
+                                      secretKeyRef:
+                                          name: "s3-credentials"
+                                          key: "AWS_ACCESS_KEY_ID"
+                                - name: AWS_SECRET_ACCESS_KEY
+                                  valueFrom:
+                                      secretKeyRef:
+                                          name: "s3-credentials"
+                                          key: "AWS_SECRET_ACCESS_KEY"
                             envFrom:
                                 - secretRef:
                                       name: "{{ app }}-secrets"
