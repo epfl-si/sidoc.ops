@@ -1,10 +1,12 @@
 registry: quay-its.epfl.ch
-organisation: svc0176
+organisation: svc0070
 image: outlinewiki
 version: 0.82.0
 app: outlinewiki
 subdomain: collab
 db_host: postgres-cluster-rw
+
+pull_secret_name: "{{ organisation }}-pull-secret"
 
 git_repo_url: https://github.com/epfl-si/wiki.ops
 
