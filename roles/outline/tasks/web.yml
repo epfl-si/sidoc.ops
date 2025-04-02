@@ -1,4 +1,4 @@
-- name: Create wiki service
+- name: Create internal Kubernetes service for wiki application
   kubernetes.core.k8s:
       definition:
           apiVersion: v1
@@ -15,7 +15,7 @@
                     port: 80
                     targetPort: 3000
 
-- name: Create wiki Ingress
+- name: Configure Nginx Ingress for external wiki access
   kubernetes.core.k8s:
       definition:
           apiVersion: networking.k8s.io/v1
@@ -43,7 +43,7 @@
                                       port:
                                           number: 80
 
-- name: Create wiki Route
+- name: Create OpenShift Route for external wiki access
   kubernetes.core.k8s:
       definition:
           apiVersion: route.openshift.io/v1
@@ -65,7 +65,73 @@
                   termination: edge
                   insecureEdgeTerminationPolicy: Redirect
 
-- name: Create Deployment
+- name: Create empty secret for admin API key storage
+  kubernetes.core.k8s:
+      state: present
+      definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+              name: "{{ app }}-admin-api-key"
+              namespace: "{{ openshift_namespace }}"
+          type: Opaque
+          data: {}
+
+- name: Create Role for init container to manage secrets
+  kubernetes.core.k8s:
+      state: present
+      definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: Role
+          metadata:
+              name: "{{ app }}-init-secret-writer"
+              namespace: "{{ openshift_namespace }}"
+          rules:
+              - apiGroups:
+                    - ""
+                resources:
+                    - "secrets"
+                verbs:
+                    - "create"
+              - apiGroups:
+                    - ""
+                resources:
+                    - "secrets"
+                resourceNames:
+                    - "{{ app }}-admin-api-key"
+                verbs:
+                    - "update"
+                    - "get"
+
+- name: Bind secret management role to init container ServiceAccount
+  kubernetes.core.k8s:
+      state: present
+      definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: RoleBinding
+          metadata:
+              name: "{{ app }}-init-secret-writer-binding"
+              namespace: "{{ openshift_namespace }}"
+          subjects:
+              - kind: ServiceAccount
+                name: "{{ app }}-init-container-sa"
+                namespace: "{{ openshift_namespace }}"
+          roleRef:
+              kind: Role
+              name: "{{ app }}-init-secret-writer"
+              apiGroup: rbac.authorization.k8s.io
+
+- name: Create ServiceAccount for init container operations
+  kubernetes.core.k8s:
+      state: present
+      definition:
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+              name: "{{ app }}-init-container-sa"
+              namespace: "{{ openshift_namespace }}"
+
+- name: Deploy wiki application with initialization container
   kubernetes.core.k8s:
       definition:
           apiVersion: apps/v1
@@ -90,6 +156,30 @@
                       volumes:
                           - name: yarn-cache
                             emptyDir: {}
+                      initContainers:
+                          - name: init
+                            image: "{{ registry }}/{{ organisation }}/{{ app }}-init:1.0.0"
+                            env:
+                                - name: DB_PASSWORD
+                                  valueFrom:
+                                      secretKeyRef:
+                                          name: "{{ app }}-db-credentials"
+                                          key: "password"
+                                - name: DB_HOST
+                                  value: "{{ db_host }}"
+                                - name: OUTLINE_ADMIN_EMAIL
+                                  value: "admin@epfl.ch"
+                                - name: OUTLINE_ADMIN_NAME
+                                  value: "EPFL Admin"
+                                - name: SECRET_NAME
+                                  value: "{{ app }}-admin-api-key"
+                            resources:
+                                requests:
+                                    cpu: 100m
+                                    memory: 256Mi
+                                limits:
+                                    cpu: 300m
+                                    memory: 512Mi
                       containers:
                           - image: "{{ registry }}/{{ organisation }}/{{ image }}:{{ version }}"
                             imagePullPolicy: Always
@@ -129,5 +219,6 @@
                             volumeMounts:
                                 - name: yarn-cache
                                   mountPath: /tmp/.yarn-cache
+                      serviceAccountName: "{{ app }}-init-container-sa"
                       imagePullSecrets:
                           - name: "{{ pull_secret_name }}"
