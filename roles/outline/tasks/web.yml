@@ -198,11 +198,6 @@
                                       secretKeyRef:
                                           name: "s3-credentials"
                                           key: "AWS_BUCKET_NAME"
-                                - name: AWS_S3_UPLOAD_BUCKET_URL
-                                  valueFrom:
-                                      secretKeyRef:
-                                          name: "s3-credentials"
-                                          key: "AWS_BUCKET_URL"
                                 - name: AWS_ACCESS_KEY_ID
                                   valueFrom:
                                       secretKeyRef:
