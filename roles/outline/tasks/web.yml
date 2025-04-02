@@ -53,7 +53,7 @@
               namespace: "{{ openshift_namespace }}"
               labels:
                   app: "{{ app }}"
-                  route: public
+                  route: private
           spec:
               host: "{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}"
               to:
