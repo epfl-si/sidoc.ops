@@ -143,7 +143,7 @@ class OutlineSync {
 	 */
 	async getAllUsers() {
 		const response = await this.outlineClient.post('/api/users.list');
-		const activeUsers = response.data.data.filter((user) => user.lastActiveAt);
+		const activeUsers = response.data.data.filter((user) => user.email !== (process.env.OUTLINE_ADMIN_EMAIL || 'admin@epfl.ch'));
 
 		logger.info('Retrieved active users', { count: activeUsers.length });
 		return activeUsers;
@@ -159,6 +159,39 @@ class OutlineSync {
 
 		logger.info('Retrieved groups', { count: groups.length });
 		return groups;
+	}
+
+	/**
+	 * Get all admins users
+	 * @returns {Array} - List of admin users
+	 */
+	async getAllAdmins() {
+		const fetchAdminsRecursively = async (group, visitedGroups) => {
+			if (visitedGroups.has(group)) {
+				return [];
+			}
+			visitedGroups.add(group);
+
+			const response = await this.epflClient.get(`/groups/${group}/members`);
+			const members = response.data.members || [];
+
+			let admins = [];
+			for (const member of members) {
+				if (member.type === 'person') {
+					admins.push({ id: member.id, email: member.email });
+				} else if (member.type === 'group') {
+					const subGroupAdmins = await fetchAdminsRecursively(member.id, visitedGroups);
+					admins = admins.concat(subGroupAdmins);
+				}
+			}
+
+			return admins;
+		};
+
+		const uniqueAdmins = Array.from(new Map((await fetchAdminsRecursively(process.env.OUTLINE_ADMIN_GROUP || 'wiki-admins', new Set())).map((admin) => [admin.id, admin])).values());
+
+		logger.info('Retrieved admin users', { count: uniqueAdmins.length });
+		return uniqueAdmins;
 	}
 
 	/**
@@ -257,6 +290,18 @@ class OutlineSync {
 	}
 
 	/**
+	 * Add a user to a admin
+	 * @param {String} userId - User ID
+	 * @returns {Boolean} - Success status
+	 */
+	async addUserToAdmin(userId, email) {
+		logger.info('Adding user to admin group', { email });
+		await this.outlineClient.post('/api/users.update_role', { id: userId, role: 'admin' });
+		logger.info('User added to admin group', { userId });
+		return true;
+	}
+
+	/**
 	 * Remove a user from a group
 	 * @param {String} userId - User ID
 	 * @param {String} groupId - Group ID
@@ -265,6 +310,17 @@ class OutlineSync {
 	async removeUserFromGroup(userId, groupId) {
 		await this.outlineClient.post('/api/groups.remove_user', { id: groupId, userId });
 		logger.info('User removed from group', { groupId, userId });
+		return true;
+	}
+
+	/**
+	 * Remove a user from a admin
+	 * @param {String} userId - User ID
+	 * @returns {Boolean} - Success status
+	 */
+	async removeUserFromAdmin(userId) {
+		await this.outlineClient.post('/api/users.update_role', { id: userId, role: 'viewer' });
+		logger.info('User removed from admin group', { userId });
 		return true;
 	}
 
@@ -279,6 +335,17 @@ class OutlineSync {
 			limit: 100,
 		});
 		return response.data.data.users;
+	}
+
+	/**
+	 * Get all admin users
+	 * @returns {Array} - List of admin users
+	 */
+	async getAllAdminUsers() {
+		const response = await this.outlineClient.post('/api/users.list', {
+			role: 'admin',
+		});
+		return response.data.data.filter((user) => user.email !== (process.env.OUTLINE_ADMIN_EMAIL || 'admin@epfl.ch'));
 	}
 
 	/**
@@ -411,6 +478,57 @@ class OutlineSync {
 			};
 		}
 	}
+
+	/**
+	 * Synchronize admin users
+	 * @returns {Object} - Sync results including success status
+	 */
+	async syncAdmins() {
+		try {
+			const admins = await this.getAllAdmins();
+
+			const existingAdminUsers = await this.getAllAdminUsers();
+
+			logger.info('Starting admin synchronization', {
+				adminsCount: admins.length,
+				existingAdminUsersCount: existingAdminUsers.length,
+			});
+
+			for (const admin of admins) {
+				const user = await this.findUserByEmail(admin.email);
+				if (user) {
+					const isAdmin = existingAdminUsers.some((existingAdmin) => existingAdmin.email === admin.email);
+					if (!isAdmin) {
+						await this.addUserToAdmin(user.id, admin.email);
+					} else {
+						logger.info('User is already an admin', { email: admin.email });
+					}
+				} else {
+					logger.warn('No user found for admin', { email: admin.email });
+				}
+			}
+
+			for (const existingAdminUser of existingAdminUsers) {
+				const isStillAdmin = admins.some((admin) => admin.email === existingAdminUser.email);
+				if (!isStillAdmin) {
+					await this.removeUserFromAdmin(existingAdminUser.id);
+				}
+			}
+
+			logger.info('Admin synchronization completed successfully');
+			return { success: true };
+		} catch (error) {
+			logger.error('Error during admin synchronization', {
+				errorMessage: error.message,
+				stack: error.stack,
+			});
+
+			return {
+				success: false,
+				error: error.message,
+			};
+		}
+	}
 }
 
 /**
@@ -432,18 +550,25 @@ async function main() {
 		// Initialize and run sync
 		const outlineSync = new OutlineSync(process.env.OUTLINE_BASE_URL, process.env.OUTLINE_API_TOKEN);
 
-		const result = await outlineSync.syncUsers();
-
-		if (!result.success) {
-			// Complete failure
+		const userResult = await outlineSync.syncUsers();
+		if (!userResult.success) {
+			// Partial failure
 			exitCode = 1;
-			logger.error('Synchronization failed', {
-				reason: result.reason || result.error || 'Unknown error',
+			logger.error('User synchronization failed', {
+				reason: userResult.reason || userResult.error || 'Unknown error',
 			});
-		} else {
-			// Full success
-			logger.info('Synchronization process completed successfully');
 		}
+
+		const adminResult = await outlineSync.syncAdmins();
+		if (!adminResult.success) {
+			// Partial failure
+			exitCode = 1;
+			logger.error('Admin synchronization failed', {
+				reason: adminResult.reason || adminResult.error || 'Unknown error',
+			});
+		}
+
+		logger.info('Synchronization process completed successfully');
 	} catch (error) {
 		// Unexpected error
 		exitCode = 1;
