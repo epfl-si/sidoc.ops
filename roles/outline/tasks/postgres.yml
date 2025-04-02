@@ -29,12 +29,16 @@
           name: "{{ app }}-db-credentials"
 
 - name: Create schedule backup
-  apiVersion: postgresql.cnpg.io/v1
-  kind: ScheduledBackup
-  metadata:
-    name: "{{ app }}-scheduled-backup"
-  spec:
-    schedule: "0 2 * * *"
-    backupOwnerReference: self
-    cluster:
-      name: postgres-cluster
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      kind: ScheduledBackup
+      apiVersion: postgresql.cnpg.io/v1
+      metadata:
+        name: "{{ app }}-scheduled-backup"
+        namespace: "{{ openshift_namespace }}"
+      spec:
+        schedule: "0 2 * * *"
+        backupOwnerReference: self
+        cluster:
+          name: postgres-cluster
