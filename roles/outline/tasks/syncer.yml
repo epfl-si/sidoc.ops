@@ -57,7 +57,7 @@
               spec:
                 containers:
                   - name: "{{ app }}-sync"
-                    image: "{{ registry }}/{{ organisation }}/{{ app }}-sync:1.5.4"
+                    image: "{{ registry }}/{{ organisation }}/{{ app }}-sync:1.5.5"
                     imagePullPolicy: Always
                     envFrom:
                       - secretRef:

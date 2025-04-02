@@ -249,7 +249,7 @@ class OutlineSync {
 		// Create the collection
 		const response = await this.outlineClient.post('/api/collections.create', {
 			name,
-			permission: null,
+			permission: 'read',
 			private: true,
 		});
 
