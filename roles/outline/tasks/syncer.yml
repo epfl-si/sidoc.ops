@@ -57,11 +57,17 @@
               spec:
                 containers:
                   - name: "{{ app }}-sync"
-                    image: "{{ registry }}/{{ organisation }}/{{ app }}-sync:1.4.1"
+                    image: "{{ registry }}/{{ organisation }}/{{ app }}-sync:1.5.4"
                     imagePullPolicy: Always
                     envFrom:
                       - secretRef:
                           name: "{{ app }}-sync"
+                    env:
+                      - name: OUTLINE_API_TOKEN
+                        valueFrom:
+                          secretKeyRef:
+                            name: outlinewiki-admin-api-key
+                            key: "API_KEY"
                     resources:
                       requests:
                         cpu: 100m
@@ -85,7 +91,6 @@
       type: Opaque
       data:
         OUTLINE_BASE_URL: "{{ ('https://' ~ subdomain ~ (env == 'test') | ternary('-test', '') ~ '.' ~ domain) | b64encode }}"
-        OUTLINE_API_TOKEN: "{{ secrets[env].sync.outline_api_token | b64encode }}"
         EPFL_API_URL: "{{ secrets[env].sync.epfl_api_url | b64encode }}"
         EPFL_API_PASSWORD: "{{ secrets[env].sync.epfl_api_password | b64encode }}"
         EPFL_API_USERNAME: "{{ secrets[env].sync.epfl_api_username | b64encode }}"
