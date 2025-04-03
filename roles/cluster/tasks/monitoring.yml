@@ -1,0 +1,64 @@
+- name: Create Telegram Bot Token Secret
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: "telegram-bot-token"
+        namespace: "{{ openshift_namespace }}"
+      data:
+        access_token: "{{ secrets[env].telegram.token | b64encode }}"
+
+- name: Create AlertmanagerConfig
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: monitoring.coreos.com/v1beta1
+      kind: AlertmanagerConfig
+      metadata:
+        name: alertmanager-telegram
+        namespace: "{{ openshift_namespace }}"
+      spec:
+        route:
+          receiver: "telegram"
+          groupBy: ["instance"]
+          groupWait: 20s
+          groupInterval: 5m
+          repeatInterval: 1m
+          matchers:
+            - name: sendto
+              value: telegram
+              matchType: "="
+        receivers:
+          - name: "telegram"
+            telegramConfigs:
+              - botToken:
+                  name: telegram-bot-token
+                  key: access_token
+                chatID: -1002647400503
+                parseMode: "Markdown"
+                message: |
+                  {% raw %}
+                  {{ if .Alerts }}
+                  {{ $first := index .Alerts 0 }}
+                  {{ if eq $first.Status "firing" }}
+                  🚨 *ALERT - {{ $first.Labels.alertname }}* 🚨
+                  *Issue detected:* {{ $first.Annotations.summary }}
+
+                  *Instance:* [{{ $first.Labels.instance }}]({{ $first.Labels.instance }})
+                  *Namespace:* {{ $first.Labels.namespace }}
+                  *Details:* {{ $first.Annotations.description }}
+                  *Incident started at:* {{ $first.StartsAt.Format "2006-01-02 15:04:05" }} UTC
+
+                  {{ else if eq $first.Status "resolved" }}
+                  ✅ *RESOLVED - {{ $first.Labels.alertname }}* ✅
+                  *Issue resolved:* {{ $first.Annotations.summary }}
+
+                  *Instance:* [{{ $first.Labels.instance }}]({{ $first.Labels.instance }})
+                  *Incident started at:* {{ $first.StartsAt.Format "2006-01-02 15:04:05" }} UTC
+                  *Resolved at:* {{ $first.EndsAt.Format "2006-01-02 15:04:05" }} UTC
+
+                  {{ end }}
+                  {{ end }}
+                  {% endraw %}
+                sendResolved: true
