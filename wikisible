@@ -81,7 +81,7 @@ ensure_login_oc "$cluster_url"
 
 inventories () {
     case "$inventory_mode" in
-        # test) echo "-i inventory/test.yml" ;;
+        test) echo "-i inventory/test.yml" ;;
         prod) echo "-i inventory/prod.yml" ;;
         *) fatal "Invalid inventory_mode" ;;
     esac
