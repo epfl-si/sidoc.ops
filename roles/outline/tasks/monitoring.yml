@@ -35,7 +35,7 @@
               - botToken:
                   name: telegram-bot-token
                   key: access_token
-                chatID: "{{ secrets[env].telegram.chat_id }}"
+                chatID: "{{ secrets[env].telegram.chat_id | int }}"
                 message: |
                   {% raw %}
                   {{ if .Alerts }}
@@ -145,18 +145,6 @@
                   summary: "{{ app }}-sync pod restarting too often"
                   description: >-
                     The {{ app }}-sync pod has restarted more than 3 times in the last 30 minutes.
-
-              - alert: "{{ app }}SyncPodUnavailable"
-                expr: >
-                  kube_pod_status_ready{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-sync-.*"} == 0
-                for: 2m
-                labels:
-                  severity: critical
-                  sendto: telegram
-                annotations:
-                  summary: "{{ app }}-sync pod is not ready"
-                  description: >-
-                    The {{ app }}-sync pod has been in an unready state (0/1) for over 2 minutes.
 
           - name: "{{ app }}-alerts"
             rules:
