@@ -88,14 +88,14 @@
               - alert: "{{ app }}SyncJobDidNotRun"
                 expr: >
                   absent(kube_job_status_start_time{namespace="{{ openshift_namespace }}", job_name="{{ app }}-sync"})
-                for: 2h
+                for: 3h
                 labels:
                   severity: warning
                   sendto: telegram
                 annotations:
                   summary: "{{ app }}-sync did not run"
                   description: >-
-                    The scheduled {{ app }}-sync CronJob did not run within the expected window (2h - 4h UTC).
+                    The scheduled {{ app }}-sync CronJob did not run within the expected window (2h - 5h UTC).
 
               - alert: "{{ app }}SyncJobRunningTooLong"
                 expr: >
