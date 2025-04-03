@@ -13,6 +13,11 @@
   tags:
     - outline.redis
 
+- name: Deploy monitoring
+  include_tasks: monitoring.yml
+  tags:
+    - outline.monitoring
+
 - name: Deploy Web Application
   include_tasks: web.yml
   tags:

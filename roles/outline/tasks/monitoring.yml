@@ -1,0 +1,185 @@
+- name: Create Telegram Bot Token Secret
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: "{{ app }}-telegram-bot-token"
+        namespace: "{{ openshift_namespace }}"
+      data:
+        access_token: "{{ secrets[env].telegram.token | b64encode }}"
+
+- name: Create AlertmanagerConfig
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: monitoring.coreos.com/v1beta1
+      kind: AlertmanagerConfig
+      metadata:
+        name: alertmanager-telegram
+        namespace: "{{ openshift_namespace }}"
+      spec:
+        route:
+          receiver: "telegram"
+          groupBy: ["instance"]
+          groupWait: 20s
+          groupInterval: 5m
+          repeatInterval: 3h
+          matchers:
+            - name: sendto
+              value: telegram
+              matchType: "="
+        receivers:
+          - name: "telegram"
+            telegramConfigs:
+              - botToken:
+                  name: telegram-bot-token
+                  key: access_token
+                chatID: "{{ secrets[env].telegram.chat_id }}"
+                message: |
+                  {% raw %}
+                  {{ if .Alerts }}
+                  {{ $first := index .Alerts 0 }}
+                  {{ if eq $first.Status "firing" }}
+                  ⚠️ *ALERT - {{ $first.Labels.alertname }}* ⚠️
+                  🔴 *Issue detected:* {{ $first.Annotations.summary }}
+
+                  📍 *Instance:* [{{ $first.Labels.instance }}]({{ $first.Labels.instance }})
+                  📖 *Details:* {{ $first.Annotations.description }}
+                  🕒 *Incident started at:* {{ $first.StartsAt.Format "2006-01-02 15:04:05" }} UTC
+
+                  {{ else if eq $first.Status "resolved" }}
+                  ✅ *RESOLVED - {{ $first.Labels.alertname }}* ✅
+                  🟢 *Issue resolved:* {{ $first.Annotations.summary }}
+
+                  📍 *Instance:* [{{ $first.Labels.instance }}]({{ $first.Labels.instance }})
+                  🕒 *Incident started at:* {{ $first.StartsAt.Format "2006-01-02 15:04:05" }} UTC
+                  🕓 *Resolved at:* {{ $first.EndsAt.Format "2006-01-02 15:04:05" }} UTC
+
+                  {{ end }}
+                  {{ end }}
+                  {% endraw %}
+                sendResolved: true
+
+- name: Create PrometheusRule for Alerts
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: monitoring.coreos.com/v1
+      kind: PrometheusRule
+      metadata:
+        name: "{{ app }}-alerts"
+        namespace: "{{ openshift_namespace }}"
+      spec:
+        groups:
+          - name: "{{ app }}-sync-alerts"
+            rules:
+              - alert: "{{ app }}SyncJobFailed"
+                expr: >
+                  kube_job_failed{namespace="{{ openshift_namespace }}", job_name="{{ app }}-sync"} > 0
+                for: 5m
+                labels:
+                  severity: critical
+                  sendto: telegram
+                annotations:
+                  summary: "{{ app }}-sync CronJob failed"
+                  description: >-
+                    The {{ app }}-sync CronJob has failed. Check logs for details.
+
+              - alert: "{{ app }}SyncJobDidNotRun"
+                expr: >
+                  absent(kube_job_status_start_time{namespace="{{ openshift_namespace }}", job_name="{{ app }}-sync"})
+                for: 2h
+                labels:
+                  severity: warning
+                  sendto: telegram
+                annotations:
+                  summary: "{{ app }}-sync did not run"
+                  description: >-
+                    The scheduled {{ app }}-sync CronJob did not run within the expected window (2h - 4h UTC).
+
+              - alert: "{{ app }}SyncJobRunningTooLong"
+                expr: >
+                  time() - kube_job_status_start_time{namespace="{{ openshift_namespace }}", job_name="{{ app }}-sync"} > 3600
+                for: 5m
+                labels:
+                  severity: critical
+                  sendto: telegram
+                annotations:
+                  summary: "{{ app }}-sync running too long"
+                  description: >-
+                    The {{ app }}-sync CronJob has been running for more than 1 hour.
+
+              - alert: "{{ app }}SyncContainerRestarting"
+                expr: >
+                  increase(kube_pod_container_status_restarts_total{namespace="{{ openshift_namespace }}", container="{{ app }}-sync"}[15m]) > 1
+                for: 5m
+                labels:
+                  severity: warning
+                  sendto: telegram
+                annotations:
+                  summary: "{{ app }}-sync container restarts detected"
+                  description: >-
+                    The container running {{ app }}-sync has restarted more than once in the last 15 minutes.
+
+              - alert: "{{ app }}SyncJobCompletedButFailed"
+                expr: >
+                  kube_job_complete{namespace="{{ openshift_namespace }}", job_name="{{ app }}-sync"} == 1
+                  and kube_job_failed{namespace="{{ openshift_namespace }}", job_name="{{ app }}-sync"} > 0
+                for: 5m
+                labels:
+                  severity: warning
+                  sendto: telegram
+                annotations:
+                  summary: "{{ app }}-sync completed but had failures"
+                  description: >-
+                    The {{ app }}-sync job completed but encountered failures. Check logs for details.
+
+              - alert: "{{ app }}SyncPodRestartingTooOften"
+                expr: >
+                  increase(kube_pod_container_status_restarts_total{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-sync-.*"}[30m]) > 3
+                for: 5m
+                labels:
+                  severity: critical
+                  sendto: telegram
+                annotations:
+                  summary: "{{ app }}-sync pod restarting too often"
+                  description: >-
+                    The {{ app }}-sync pod has restarted more than 3 times in the last 30 minutes.
+
+              - alert: "{{ app }}SyncPodUnavailable"
+                expr: >
+                  kube_pod_status_ready{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-sync-.*"} == 0
+                for: 2m
+                labels:
+                  severity: critical
+                  sendto: telegram
+                annotations:
+                  summary: "{{ app }}-sync pod is not ready"
+                  description: >-
+                    The {{ app }}-sync pod has been in an unready state (0/1) for over 2 minutes.
+
+          - name: "{{ app }}-alerts"
+            rules:
+              - alert: "{{ app }}PodRestartingTooOften"
+                expr: >
+                  increase(kube_pod_container_status_restarts_total{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-.*"}[30m]) > 3
+                for: 5m
+                labels:
+                  severity: critical
+                  sendto: telegram
+                annotations:
+                  summary: "{{ app }} pod restarting too often"
+                  description: >-
+                    The {{ app }} pod has restarted more than 3 times in the last 30 minutes.
+
+              - alert: "{{ app }}PodUnavailable"
+                expr: >
+                  kube_pod_status_ready{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-.*"} == 0
+                for: 1m
+                labels:
+                  severity: critical
+                  sendto: telegram
+                annotations:
+                  summary: "{{ app }} pod is not ready"
+                  description: >-
+                    The {{ app }} pod has been in an unready state (0/1) for over 5 minutes.
