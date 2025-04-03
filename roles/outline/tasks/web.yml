@@ -131,6 +131,23 @@
               name: "{{ app }}-init-container-sa"
               namespace: "{{ openshift_namespace }}"
 
+- name: Create a PVC for uploads
+  kubernetes.core.k8s:
+      state: present
+      definition:
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+              name: "{{ app }}-uploads"
+              namespace: "{{ openshift_namespace }}"
+          spec:
+              accessModes:
+                  - ReadWriteMany
+              storageClassName: "{{ storage_class }}"
+              resources:
+                  requests:
+                      storage: 10Gi
+
 - name: Deploy wiki application with initialization container
   kubernetes.core.k8s:
       definition:
@@ -156,6 +173,9 @@
                       volumes:
                           - name: yarn-cache
                             emptyDir: {}
+                          - name: "{{ app }}-uploads"
+                            persistentVolumeClaim:
+                                claimName: "{{ app }}-uploads"
                       initContainers:
                           - name: init
                             image: "{{ registry }}/{{ organisation }}/{{ app }}-init:1.0.0"
@@ -193,21 +213,6 @@
                                   value: "https://{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}"
                                 - name: COLLABORATION_URL
                                   value: "https://{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}/collaboration"
-                                - name: AWS_S3_UPLOAD_BUCKET_NAME
-                                  valueFrom:
-                                      secretKeyRef:
-                                          name: "s3-credentials"
-                                          key: "AWS_BUCKET_NAME"
-                                - name: AWS_ACCESS_KEY_ID
-                                  valueFrom:
-                                      secretKeyRef:
-                                          name: "s3-credentials"
-                                          key: "AWS_ACCESS_KEY_ID"
-                                - name: AWS_SECRET_ACCESS_KEY
-                                  valueFrom:
-                                      secretKeyRef:
-                                          name: "s3-credentials"
-                                          key: "AWS_SECRET_ACCESS_KEY"
                             envFrom:
                                 - secretRef:
                                       name: "{{ app }}-secrets"
@@ -234,6 +239,8 @@
                             volumeMounts:
                                 - name: yarn-cache
                                   mountPath: /tmp/.yarn-cache
+                                - name: "{{ app }}-uploads"
+                                  mountPath: /var/lib/outline/data
                       serviceAccountName: "{{ app }}-init-container-sa"
                       imagePullSecrets:
                           - name: "{{ pull_secret_name }}"

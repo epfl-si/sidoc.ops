@@ -6,6 +6,7 @@ app: outlinewiki
 subdomain: collab
 db_host: postgres-cluster-rw
 
+storage_class: wiki
 pull_secret_name: "{{ organisation }}-pull-secret"
 
 git_repo_url: https://github.com/epfl-si/wiki.ops
