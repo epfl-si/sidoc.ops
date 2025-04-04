@@ -10,55 +10,60 @@
         groups:
           - name: "{{ app }}-sync-alerts"
             rules:
-              - alert: "{{ app }}SyncJobFailed"
+              - alert: "{{ app[0]|upper }}{{ app[1:] }}SyncJobFailed"
                 expr: >
                   kube_job_failed{namespace="{{ openshift_namespace }}", job_name="{{ app }}-sync"} > 0
                 for: 5m
                 labels:
                   severity: critical
                   sendto: telegram
+                  app: "{{ app }}"
                 annotations:
                   summary: "{{ app }}-sync CronJob failed"
                   description: >-
                     The {{ app }}-sync CronJob has failed. Check logs for details.
 
-              - alert: "{{ app }}SyncJobDidNotRun"
+              - alert: "{{ app[0]|upper }}{{ app[1:] }}SyncJobDidNotRun"
                 expr: >
                   (hour() > 5 or hour() < 2) and
                   (time() - max(kube_job_status_start_time{namespace="{{ openshift_namespace }}", job_name=~"{{ app }}-sync.*"})) > 24 * 3600
+                for: 5m
                 labels:
                   severity: warning
                   sendto: telegram
+                  app: "{{ app }}"
                 annotations:
                   summary: "{{ app }}-sync didn't run in its scheduled window"
                   description: >-
                     The {{ app }}-sync CronJob didn't execute during its scheduled window (2h - 5h UTC).
 
-              - alert: "{{ app }}SyncJobRunningTooLong"
+              - alert: "{{ app[0]|upper }}{{ app[1:] }}SyncJobRunningTooLong"
                 expr: >
                   time() - kube_job_status_start_time{namespace="{{ openshift_namespace }}", job_name="{{ app }}-sync"} > 3600
                 for: 5m
                 labels:
                   severity: critical
                   sendto: telegram
+                  app: "{{ app }}"
                 annotations:
                   summary: "{{ app }}-sync running too long"
                   description: >-
                     The {{ app }}-sync CronJob has been running for more than 1 hour.
 
-              - alert: "{{ app }}SyncContainerRestarting"
+              - alert: "{{ app[0]|upper }}{{ app[1:] }}SyncContainerRestarting"
                 expr: >
                   increase(kube_pod_container_status_restarts_total{namespace="{{ openshift_namespace }}", container="{{ app }}-sync"}[15m]) > 1
                 for: 5m
                 labels:
                   severity: warning
                   sendto: telegram
+                  app: "{{ app }}"
                 annotations:
                   summary: "{{ app }}-sync container restarts detected"
                   description: >-
                     The container running {{ app }}-sync has restarted more than once in the last 15 minutes.
 
-              - alert: "{{ app }}SyncJobCompletedButFailed"
+              - alert: "{{ app[0]|upper }}{{ app[1:] }}SyncJobCompletedButFailed"
                 expr: >
                   kube_job_complete{namespace="{{ openshift_namespace }}", job_name="{{ app }}-sync"} == 1
                   and kube_job_failed{namespace="{{ openshift_namespace }}", job_name="{{ app }}-sync"} > 0
@@ -66,59 +71,222 @@
                 labels:
                   severity: warning
                   sendto: telegram
+                  app: "{{ app }}"
                 annotations:
                   summary: "{{ app }}-sync completed but had failures"
                   description: >-
                     The {{ app }}-sync job completed but encountered failures. Check logs for details.
 
-              - alert: "{{ app }}SyncPodRestartingTooOften"
+              - alert: "{{ app[0]|upper }}{{ app[1:] }}SyncPodRestartingTooOften"
                 expr: >
                   increase(kube_pod_container_status_restarts_total{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-sync-.*"}[30m]) > 3
                 for: 5m
                 labels:
                   severity: critical
                   sendto: telegram
+                  app: "{{ app }}"
                 annotations:
                   summary: "{{ app }}-sync pod restarting too often"
                   description: >-
                     The {{ app }}-sync pod has restarted more than 3 times in the last 30 minutes.
 
-          - name: "{{ app }}-alerts"
+          - name: "{{ app }}-pod-alerts"
             rules:
-              - alert: "{{ app }}PodRestartingTooOften"
+              - alert: "{{ app[0]|upper }}{{ app[1:] }}PodRestartingTooOften"
                 expr: >
-                  increase(kube_pod_container_status_restarts_total{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-.*"}[30m]) > 3
+                  increase(kube_pod_container_status_restarts_total{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-.*", pod!~"{{ app }}-(sync|redis).*"}[30m]) > 3
                 for: 5m
                 labels:
                   severity: critical
                   sendto: telegram
+                  app: "{{ app }}"
                 annotations:
-                  summary: "{{ app }} pod restarting too often"
+                  summary: "{{ app }} application pod restarting too often"
                   description: >-
-                    The {{ app }} pod has restarted more than 3 times in the last 30 minutes.
+                    The {{ app }} application pod has restarted more than 3 times in the last 30 minutes.
 
-              - alert: "{{ app }}PodUnavailable"
+              - alert: "{{ app[0]|upper }}{{ app[1:] }}PodMissing"
                 expr: >
-                  kube_pod_status_ready{namespace="svc0070p-wikis",pod=~"outlinewiki-.*", condition="true"} == 0 unless on(pod) kube_pod_status_ready{namespace="svc0070p-wikis",pod=~"outlinewiki-(sync|redis).*"}
-                for: 1m
+                  absent(kube_pod_info{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-[^(sync|redis)].*"}) == 1
+                for: 15s
                 labels:
                   severity: critical
                   sendto: telegram
+                  app: "{{ app }}"
                 annotations:
-                  summary: "{{ app }} pod is not ready"
+                  summary: "{{ app }} application pod is missing"
                   description: >-
-                    The {{ app }} pod has been in an unready state (0/1) for over 1 minutes.
+                    No {{ app }} application pod is running for more than 15 seconds.
+
+              - alert: "{{ app[0]|upper }}{{ app[1:] }}PodNotReady"
+                expr: >
+                  sum by (pod) (kube_pod_status_phase{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-[^(sync|redis)].*", phase=~"Running|Pending"}) > 0
+                  and
+                  sum by (pod) (kube_pod_status_ready{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-[^(sync|redis)].*", condition="true"}) == 0
+                for: 15s
+                labels:
+                  severity: critical
+                  sendto: telegram
+                  app: "{{ app }}"
+                annotations:
+                  summary: "{{ app }} application pod is not ready"
+                  description: >-
+                    The {{ app }} application pod is running but not ready for more than 15 seconds.
+
+              - alert: "{{ app[0]|upper }}{{ app[1:] }}PodCrashLoopBackOff"
+                expr: >
+                  sum by (pod) (kube_pod_container_status_waiting_reason{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-[^(sync|redis)].*", reason="CrashLoopBackOff"}) > 0
+                for: 15s
+                labels:
+                  severity: critical
+                  sendto: telegram
+                  app: "{{ app }}"
+                annotations:
+                  summary: "{{ app }} pod is in CrashLoopBackOff"
+                  description: >-
+                    The {{ app }} application pod is in CrashLoopBackOff state for more than 15 seconds.
 
           - name: "{{ app }}-redis-alerts"
             rules:
-              - alert: "{{ app }}RedisPodUnavailable"
+              - alert: "{{ app[0]|upper }}{{ app[1:] }}RedisPodMissing"
                 expr: >
-                  kube_pod_status_ready{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-redis-.*", condition="true"} == 0
+                  absent(kube_pod_info{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-redis-.*"})
+                for: 15s
+                labels:
+                  severity: critical
+                  sendto: telegram
+                  app: "{{ app }}"
+                annotations:
+                  summary: "{{ app }} Redis pod is missing"
+                  description: >-
+                    No Redis pod for {{ app }} is running for more than 15 seconds.
+
+              - alert: "{{ app[0]|upper }}{{ app[1:] }}RedisPodNotReady"
+                expr: >
+                  sum by (pod) (kube_pod_status_phase{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-redis-.*", phase=~"Running|Pending"}) > 0
+                  and
+                  sum by (pod) (kube_pod_status_ready{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-redis-.*", condition="true"}) == 0
+                for: 15s
+                labels:
+                  severity: critical
+                  sendto: telegram
+                  app: "{{ app }}"
+                annotations:
+                  summary: "{{ app }} Redis pod is not ready"
+                  description: >-
+                    The {{ app }} Redis pod is running but not ready for more than 15 seconds.
+
+              - alert: "{{ app[0]|upper }}{{ app[1:] }}RedisPodCrashLoopBackOff"
+                expr: >
+                  sum by (pod) (kube_pod_container_status_waiting_reason{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-redis-.*", reason="CrashLoopBackOff"}) > 0
+                for: 2m
+                labels:
+                  severity: critical
+                  sendto: telegram
+                  app: "{{ app }}"
+                annotations:
+                  summary: "{{ app }} Redis pod is in CrashLoopBackOff"
+                  description: >-
+                    The {{ app }} Redis pod is in CrashLoopBackOff state. Check pod logs and events.
+
+- name: Deploy Probe for HTTP endpoint monitoring
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: monitoring.rhobs/v1
+      kind: Probe
+      metadata:
+        name: "{{ app }}-http-probe"
+        namespace: "{{ openshift_namespace }}"
+      spec:
+        interval: 30s
+        scrapeTimeout: 10s
+        module: http_2xx
+        prober:
+          url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+        targets:
+          staticConfig:
+            static:
+              - https://{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}
+        metricRelabelings:
+          - sourceLabels: [__address__]
+            targetLabel: instance
+          - sourceLabels: [__address__]
+            targetLabel: target
+          - targetLabel: job
+            replacement: "{{ app }}-probe"
+
+# Create a PrometheusRule for the Probe alerts
+- name: Create PrometheusRule for Probe Alerts
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: monitoring.coreos.com/v1
+      kind: PrometheusRule
+      metadata:
+        name: "{{ app }}-probe-alerts"
+        namespace: "{{ openshift_namespace }}"
+      spec:
+        groups:
+          - name: "{{ app }}-endpoint-alerts"
+            rules:
+              - alert: "{{ app[0]|upper }}{{ app[1:] }}EndpointDown"
+                expr: >
+                  probe_success{job="{{ app }}-probe"} == 0
                 for: 1m
                 labels:
                   severity: critical
                   sendto: telegram
+                  app: "{{ app }}"
                 annotations:
-                  summary: "{{ app }} Redis pod is not ready"
+                  summary: "{{ app }} endpoint is down"
                   description: >-
-                    The {{ app }} Redis pod has been in an unready state (0/1) for over 1 minutes.
+                    The {{ app }} endpoint https://{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }} has been unreachable for over 1 minute.
+
+              - alert: "{{ app[0]|upper }}{{ app[1:] }}SlowResponse"
+                expr: >
+                  probe_duration_seconds{job="{{ app }}-probe"} > 2
+                for: 5m
+                labels:
+                  severity: warning
+                  sendto: telegram
+                  app: "{{ app }}"
+                annotations:
+                  summary: "{{ app }} slow response time"
+                  description: >-
+                    The {{ app }} endpoint is responding slowly (>2s) for over 5 minutes.
+
+              - alert: "{{ app[0]|upper }}{{ app[1:] }}SSLCertExpiringSoon"
+                expr: >
+                  probe_ssl_earliest_cert_expiry{job="{{ app }}-probe"} - time() < 86400 * 14
+                for: 1h
+                labels:
+                  severity: warning
+                  sendto: telegram
+                  app: "{{ app }}"
+                annotations:
+                  summary: "{{ app }} SSL certificate expiring soon"
+                  description: >-
+                    The SSL certificate for {{ app }} will expire in less than 14 days.
+
+#
+- name: Deploy Blackbox Exporter ConfigMap
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "{{ app }}-blackbox-config"
+        namespace: "{{ openshift_namespace }}"
+      data:
+        blackbox.yml: |
+          modules:
+            http_2xx:
+              prober: http
+              timeout: 5s
+              http:
+                valid_status_codes: [200]
+                method: GET
+                preferred_ip_protocol: "ip4"
+                fail_if_ssl: false
+                fail_if_not_ssl: true
+                tls_config:
+                  insecure_skip_verify: false
