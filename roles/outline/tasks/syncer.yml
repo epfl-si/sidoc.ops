@@ -47,7 +47,7 @@
         name: "{{ app }}-sync-cron"
         namespace: "{{ openshift_namespace }}"
       spec:
-        schedule: "0 2 * * *"
+        schedule: "30 9-17 * * *"
         concurrencyPolicy: Forbid
         successfulJobsHistoryLimit: 3
         failedJobsHistoryLimit: 1
