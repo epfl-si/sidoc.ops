@@ -10,7 +10,7 @@
           spec:
               backup:
                   barmanObjectStore:
-                      destinationPath: "s3://{{ secrets[env].s3.name }}/postgresql-backup"
+                      destinationPath: "s3://{{ secrets[env].s3.name }}"
                       endpointURL: "https://{{ secrets[env].s3.host }}"
                       s3Credentials:
                           accessKeyId:
