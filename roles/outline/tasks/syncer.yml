@@ -47,7 +47,7 @@
         name: "{{ app }}-sync-cron"
         namespace: "{{ openshift_namespace }}"
       spec:
-        schedule: "30 9-17 * * *"
+        schedule: "30 * * * *"
         concurrencyPolicy: Forbid
         successfulJobsHistoryLimit: 3
         failedJobsHistoryLimit: 1
@@ -66,7 +66,7 @@
                       - name: OUTLINE_API_TOKEN
                         valueFrom:
                           secretKeyRef:
-                            name: outlinewiki-admin-api-key
+                            name: "{{ app }}-api-key-admin"
                             key: "API_KEY"
                     resources:
                       requests:
