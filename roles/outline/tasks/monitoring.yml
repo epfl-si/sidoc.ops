@@ -258,7 +258,7 @@
           spec:
             containers:
               - name: outline-exporter
-                image: "{{ registry }}/{{ organisation }}/{{ app }}-exporter:1.0.1"
+                image: "{{ registry }}/{{ organisation }}/{{ app }}-exporter:1.2.0"
                 imagePullPolicy: Always
                 ports:
                   - containerPort: 9877
