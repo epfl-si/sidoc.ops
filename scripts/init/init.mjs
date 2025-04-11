@@ -24,7 +24,7 @@ const logger = {
 	warn: (message, data) => logger.log('WARN', message, data),
 };
 
-class AdminKeySetup {
+class ApiKeySetup {
 	constructor() {
 		// Initialize Kubernetes client
 		this.kc = new k8s.KubeConfig();
@@ -42,15 +42,25 @@ class AdminKeySetup {
 		this.adminEmail = process.env.OUTLINE_ADMIN_EMAIL || 'admin@epfl.ch';
 		this.adminName = process.env.OUTLINE_ADMIN_NAME || 'EPFL Admin';
 
+		// API Keys configuration
+		this.defaultKeyExpiration = process.env.API_KEY_EXPIRATION || '2029-06-30T21:59:59.999Z';
+
+		// Admin API key config
+		this.adminSecretName = process.env.ADMIN_SECRET_NAME || 'outlinewiki-api-key-admin';
+		this.adminKeyName = 'admin-api-key';
+
+		// Monitoring API key config
+		this.monitoringSecretName = process.env.MONITORING_SECRET_NAME || 'outlinewiki-api-key-monitoring';
+		this.monitoringKeyName = 'monitoring-api-key';
+
 		// Auto-detect namespace or use provided value
 		this.detectNamespace();
-		this.secretName = process.env.SECRET_NAME || 'outlinewiki-admin-api-key';
-		this.apiKeyExpiration = process.env.API_KEY_EXPIRATION || '2029-06-30T21:59:59.999Z';
 
 		logger.info('Initialized with configuration', {
 			dbHost: this.dbHost,
 			dbName: this.dbName,
-			secretName: this.secretName,
+			adminSecretName: this.adminSecretName,
+			monitoringSecretName: this.monitoringSecretName,
 			adminEmail: this.adminEmail,
 		});
 
@@ -167,14 +177,15 @@ class AdminKeySetup {
 
 	/**
 	 * Find existing K8s secret and extract API key if it exists
+	 * @param {String} secretName - Name of the secret to check
 	 * @returns {String|null} Existing API key or null
 	 */
-	async getExistingSecretApiKey() {
+	async getExistingSecretApiKey(secretName) {
 		try {
-			const secret = await this.k8sApi.readNamespacedSecret({ name: this.secretName, namespace: this.namespace });
+			const secret = await this.k8sApi.readNamespacedSecret({ name: secretName, namespace: this.namespace });
 			if (secret?.data?.API_KEY) {
 				const apiKey = Buffer.from(secret.data.API_KEY, 'base64').toString();
-				logger.info('Found existing API key in Kubernetes secret');
+				logger.info('Found existing API key in Kubernetes secret', { secretName });
 				return apiKey;
 			}
 		} catch (error) {
@@ -182,9 +193,10 @@ class AdminKeySetup {
 				logger.warn('Error checking existing Kubernetes secret', {
 					error: error.message,
 					statusCode: error.response?.statusCode,
+					secretName,
 				});
 			} else {
-				logger.info('No existing Kubernetes secret found');
+				logger.info('No existing Kubernetes secret found', { secretName });
 			}
 		}
 		return null;
@@ -208,7 +220,7 @@ class AdminKeySetup {
 
 			// Look up the API key in the database
 			const query = `
-				SELECT ak.id as "apiKeyId", ak."userId", u.email, u.role, u.flags
+				SELECT ak.id as "apiKeyId", ak."userId", ak.name, u.email, u.role, u.flags
 				FROM "apiKeys" ak
 				JOIN users u ON ak."userId" = u.id
 				WHERE ak.hash = $1 AND ak.last4 = $2
@@ -222,6 +234,7 @@ class AdminKeySetup {
 
 				logger.info('Validated existing API key', {
 					apiKeyId: user.apiKeyId,
+					apiKeyName: user.name,
 					userId: user.userId,
 					email: user.email,
 					role: user.role,
@@ -231,6 +244,7 @@ class AdminKeySetup {
 				return {
 					userId: user.userId,
 					apiKeyId: user.apiKeyId,
+					apiKeyName: user.name,
 					email: user.email,
 					isSuper,
 				};
@@ -463,63 +477,55 @@ class AdminKeySetup {
 	}
 
 	/**
-	 * Check and manage existing API keys for admin
+	 * Check and manage existing API key
 	 * @param {Client} client - Database client
-	 * @param {String} adminId - Admin user ID
-	 * @returns {Object} API key info or null if new key needed
+	 * @param {String} userId - User ID
+	 * @param {String} keyName - Name of the API key
+	 * @param {String} secretName - Name of the Kubernetes secret
+	 * @returns {Object} API key status info
 	 */
-	async manageExistingApiKeys(client, adminId) {
+	async manageExistingApiKey(client, userId, keyName, secretName) {
 		// Get existing API key from K8s secret
-		const existingSecretApiKey = await this.getExistingSecretApiKey();
+		const existingSecretApiKey = await this.getExistingSecretApiKey(secretName);
 
 		// If there's a key in the secret, validate it
 		if (existingSecretApiKey) {
 			const validatedKey = await this.validateExistingApiKey(client, existingSecretApiKey);
 
 			if (validatedKey) {
-				// If the key belongs to our admin, we're good
-				if (validatedKey.userId === adminId) {
-					logger.info('Existing API key is valid and belongs to correct admin');
+				// If the key belongs to our user and has the correct name
+				if (validatedKey.userId === userId && validatedKey.apiKeyName === keyName) {
+					logger.info('Existing API key is valid and belongs to correct user', { keyName });
 					return {
 						valid: true,
 						existingKey: existingSecretApiKey,
 						apiKeyId: validatedKey.apiKeyId,
 					};
 				} else {
-					// Key belongs to another user, revoke it
-					logger.warn('API key in secret belongs to another user, revoking it', {
+					// Key belongs to another user or has wrong name
+					logger.warn('API key in secret is invalid for this purpose', {
 						keyUserId: validatedKey.userId,
-						adminId,
+						expectedUserId: userId,
+						keyName: validatedKey.apiKeyName,
+						expectedKeyName: keyName,
 					});
-
-					await this.revokeApiKeys(client, [validatedKey.userId]);
 				}
 			}
 		}
 
-		// Check if admin has any existing API keys with the expected name
+		// Check if user has any existing API keys with the expected name
 		const existingApiKeyQuery = `
             SELECT id FROM "apiKeys" 
             WHERE "userId" = $1 AND name = $2 
             LIMIT 1
         `;
 
-		const existingKeyResult = await client.query(existingApiKeyQuery, [adminId, 'admin-api-key']);
+		const existingKeyResult = await client.query(existingApiKeyQuery, [userId, keyName]);
 
 		if (existingKeyResult.rows.length > 0) {
-			// Admin has an existing key but it doesn't match the secret, revoke it
-			logger.info("Admin has existing API key but it doesn't match the K8s secret, revoking it");
+			// User has an existing key but it doesn't match the secret, revoke it
+			logger.info(`User has existing API key with name '${keyName}' but it doesn't match the K8s secret, revoking it`);
 			await client.query(`DELETE FROM "apiKeys" WHERE id = $1`, [existingKeyResult.rows[0].id]);
-		}
-
-		// Revoke all other API keys for this admin to maintain a single admin key
-		const allKeysQuery = `SELECT id FROM "apiKeys" WHERE "userId" = $1`;
-		const allKeys = await client.query(allKeysQuery, [adminId]);
-
-		if (allKeys.rows.length > 0) {
-			const keyIds = allKeys.rows.map((row) => row.id);
-			logger.info('Revoking all existing API keys for admin', { count: keyIds.length });
-			await client.query(`DELETE FROM "apiKeys" WHERE id = ANY($1::uuid[])`, [keyIds]);
 		}
 
 		return { valid: false };
@@ -528,16 +534,17 @@ class AdminKeySetup {
 	/**
 	 * Generate and store API key
 	 * @param {Client} client - Database client
-	 * @param {String} adminId - Admin user ID
+	 * @param {String} userId - User ID
+	 * @param {String} keyName - Name of the API key
 	 * @returns {String} Generated API key
 	 */
-	async createApiKey(client, adminId) {
+	async createApiKey(client, userId, keyName) {
 		// Generate a secure random token with the correct prefix
 		const prefix = 'ol_api_';
 		const secret = `${prefix}${this.generateRandomString(38)}`;
 		const apiKeyId = crypto.randomUUID();
 		const createdAt = new Date().toISOString();
-		const expiresAt = new Date(this.apiKeyExpiration);
+		const expiresAt = new Date(this.defaultKeyExpiration);
 
 		// Hash the API key using SHA-256
 		const hash = crypto.createHash('sha256').update(secret).digest('hex');
@@ -549,18 +556,19 @@ class AdminKeySetup {
 			VALUES ($1, $2, $3, $4, $5, $6, $6, $7)
 		`;
 
-		await client.query(insertApiKeyQuery, [apiKeyId, 'admin-api-key', hash, last4, adminId, createdAt, expiresAt]);
+		await client.query(insertApiKeyQuery, [apiKeyId, keyName, hash, last4, userId, createdAt, expiresAt]);
 
-		logger.info('Created new API token for admin', { apiKeyId });
+		logger.info('Created new API token', { apiKeyId, keyName });
 		return secret;
 	}
 
 	/**
 	 * Store API key in Kubernetes secret
 	 * @param {String} apiKey - The API key to store
+	 * @param {String} secretName - Name of the Kubernetes secret
 	 * @returns {Boolean} Success status
 	 */
-	async storeInKubernetesSecret(apiKey) {
+	async storeInKubernetesSecret(apiKey, secretName) {
 		try {
 			// Create secret data with base64 encoded API key
 			const secretData = {
@@ -575,7 +583,7 @@ class AdminKeySetup {
 						apiVersion: 'v1',
 						kind: 'Secret',
 						metadata: {
-							name: this.secretName,
+							name: secretName,
 							namespace: this.namespace,
 						},
 						data: secretData,
@@ -583,31 +591,31 @@ class AdminKeySetup {
 					},
 				});
 				logger.info('Kubernetes secret created successfully', {
-					secretName: this.secretName,
+					secretName: secretName,
 					namespace: this.namespace,
 				});
 			} catch (error) {
 				// If secret already exists (409 Conflict), update it
 				if (error.body && JSON.parse(error.body).code === 409) {
 					logger.info('Secret already exists, updating', {
-						secretName: this.secretName,
+						secretName: secretName,
 					});
 
 					await this.k8sApi.replaceNamespacedSecret({
 						namespace: this.namespace,
-						name: this.secretName,
+						name: secretName,
 						body: {
 							apiVersion: 'v1',
 							kind: 'Secret',
 							metadata: {
-								name: this.secretName,
+								name: secretName,
 								namespace: this.namespace,
 							},
 							data: secretData,
 							type: 'Opaque',
 						},
 					});
-					logger.info('Kubernetes secret updated successfully');
+					logger.info('Kubernetes secret updated successfully', { secretName });
 				} else {
 					throw error;
 				}
@@ -617,7 +625,7 @@ class AdminKeySetup {
 			logger.error('Error storing API key in Kubernetes', {
 				error: error.message,
 				stack: error.stack,
-				secretName: this.secretName,
+				secretName: secretName,
 				namespace: this.namespace,
 			});
 			return false;
@@ -625,7 +633,58 @@ class AdminKeySetup {
 	}
 
 	/**
-	 * Main process to create admin user and API key
+	 * Setup API key for a specific purpose
+	 * @param {Client} client - Database client
+	 * @param {String} userId - User ID
+	 * @param {String} keyName - Name of the API key
+	 * @param {String} secretName - Name of the Kubernetes secret
+	 * @returns {Object} Result of the operation
+	 */
+	async setupApiKey(client, userId, keyName, secretName) {
+		try {
+			const keyStatus = await this.manageExistingApiKey(client, userId, keyName, secretName);
+
+			let apiKey;
+
+			if (keyStatus.valid && keyStatus.existingKey) {
+				// Use existing key
+				apiKey = keyStatus.existingKey;
+				logger.info(`Using existing valid ${keyName}`);
+			} else {
+				// Create new API key
+				apiKey = await this.createApiKey(client, userId, keyName);
+				logger.info(`New ${keyName} created`);
+			}
+
+			// Store API key in Kubernetes secret
+			const secretStored = await this.storeInKubernetesSecret(apiKey, secretName);
+
+			if (!secretStored) {
+				return {
+					success: false,
+					message: `Failed to store ${keyName} in Kubernetes secret`,
+				};
+			}
+
+			return {
+				success: true,
+				message: `${keyName} setup completed successfully`,
+			};
+		} catch (error) {
+			logger.error(`${keyName} setup failed`, {
+				error: error.message,
+				stack: error.stack,
+			});
+
+			return {
+				success: false,
+				error: error.message,
+			};
+		}
+	}
+
+	/**
+	 * Main process to create admin user and setup API keys
 	 * @returns {Object} Result of the operation
 	 */
 	async setup() {
@@ -635,38 +694,35 @@ class AdminKeySetup {
 
 			await client.query('BEGIN');
 
+			// Find or create admin user
 			const adminId = await this.createOrFindAdmin(client);
 
-			const keyStatus = await this.manageExistingApiKeys(client, adminId);
+			// Setup admin API key
+			const adminKeyResult = await this.setupApiKey(client, adminId, this.adminKeyName, this.adminSecretName);
 
-			let apiKey;
-
-			if (keyStatus.valid && keyStatus.existingKey) {
-				// Use existing key
-				apiKey = keyStatus.existingKey;
-				logger.info('Using existing valid API key');
-			} else {
-				// Create new API key
-				apiKey = await this.createApiKey(client, adminId);
-				logger.info('New API key created');
-			}
-
-			// Store API key in Kubernetes secret
-			const secretStored = await this.storeInKubernetesSecret(apiKey);
+			// Setup monitoring API key (read-only)
+			const monitoringKeyResult = await this.setupApiKey(client, adminId, this.monitoringKeyName, this.monitoringSecretName);
 
 			// Commit the transaction
 			await client.query('COMMIT');
 
-			if (!secretStored) {
+			if (!adminKeyResult.success) {
 				return {
 					success: false,
-					message: 'Failed to store API key in Kubernetes secret',
+					message: adminKeyResult.message || adminKeyResult.error,
+				};
+			}
+
+			if (!monitoringKeyResult.success) {
+				return {
+					success: false,
+					message: monitoringKeyResult.message || monitoringKeyResult.error,
 				};
 			}
 
 			return {
 				success: true,
-				message: 'Admin user and API key setup completed successfully',
+				message: 'Admin user, admin API key, and monitoring API key setup completed successfully',
 			};
 		} catch (error) {
 			// Rollback transaction in case of error
@@ -716,8 +772,8 @@ async function main() {
 		}
 
 		// Initialize and run the setup
-		const adminSetup = new AdminKeySetup();
-		const result = await adminSetup.setup();
+		const apiKeySetup = new ApiKeySetup();
+		const result = await apiKeySetup.setup();
 
 		if (!result.success) {
 			// Complete failure
