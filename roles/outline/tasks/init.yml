@@ -1,0 +1,147 @@
+- name: Create empty secret for admin API key storage
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ item }}"
+        namespace: "{{ openshift_namespace }}"
+      type: Opaque
+      data: {}
+  loop:
+    - "{{ app }}-api-key-admin"
+    - "{{ app }}-api-key-monitoring"
+
+- name: Create Role for init job to manage secrets
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: Role
+      metadata:
+        name: "{{ app }}-init-secret-writer"
+        namespace: "{{ openshift_namespace }}"
+      rules:
+        - apiGroups:
+            - ""
+          resources:
+            - "secrets"
+          verbs:
+            - "create"
+        - apiGroups:
+            - ""
+          resources:
+            - "secrets"
+          resourceNames:
+            - "{{ app }}-api-key-admin"
+            - "{{ app }}-api-key-monitoring"
+          verbs:
+            - "update"
+            - "get"
+
+- name: Bind secret management role to init job ServiceAccount
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        name: "{{ app }}-init-secret-writer-binding"
+        namespace: "{{ openshift_namespace }}"
+      subjects:
+        - kind: ServiceAccount
+          name: "{{ app }}-init-container-sa"
+          namespace: "{{ openshift_namespace }}"
+      roleRef:
+        kind: Role
+        name: "{{ app }}-init-secret-writer"
+        apiGroup: rbac.authorization.k8s.io
+
+- name: Create ServiceAccount for init container operations
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: "{{ app }}-init-container-sa"
+        namespace: "{{ openshift_namespace }}"
+
+- name: Wait for wiki deployment to be ready
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    name: "{{ app }}"
+    namespace: "{{ openshift_namespace }}"
+  register: deployment_status
+  until: deployment_status.resources[0].status.readyReplicas is defined and deployment_status.resources[0].status.readyReplicas > 0
+  retries: 30
+  delay: 10
+
+- name: Check if init job already exists
+  kubernetes.core.k8s_info:
+    api_version: batch/v1
+    kind: Job
+    name: "{{ app }}-init-job"
+    namespace: "{{ openshift_namespace }}"
+  register: init_job_status
+
+- name: Delete existing initialization job for wiki
+  kubernetes.core.k8s:
+    state: absent
+    definition:
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: "{{ app }}-init-job"
+        namespace: "{{ openshift_namespace }}"
+  when: init_job_status.resources | length > 0
+
+- name: Create initialization job for wiki
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: "{{ app }}-init-job"
+        namespace: "{{ openshift_namespace }}"
+      spec:
+        backoffLimit: 3
+        activeDeadlineSeconds: 600
+        template:
+          metadata:
+            labels:
+              app: "{{ app }}-init"
+          spec:
+            containers:
+              - name: init
+                image: "{{ registry }}/{{ organisation }}/{{ app }}-init:1.1.1"
+                env:
+                  - name: DB_PASSWORD
+                    valueFrom:
+                      secretKeyRef:
+                        name: "{{ app }}-db-credentials"
+                        key: "password"
+                  - name: DB_HOST
+                    value: "{{ db_host }}"
+                  - name: OUTLINE_ADMIN_EMAIL
+                    value: "admin@epfl.ch"
+                  - name: OUTLINE_ADMIN_NAME
+                    value: "EPFL Admin"
+                  - name: ADMIN_SECRET_NAME
+                    value: "{{ app }}-api-key-admin"
+                  - name: MONITORING_SECRET_NAME
+                    value: "{{ app }}-api-key-monitoring"
+                resources:
+                  requests:
+                    cpu: 100m
+                    memory: 256Mi
+                  limits:
+                    cpu: 300m
+                    memory: 512Mi
+            restartPolicy: OnFailure
+            serviceAccountName: "{{ app }}-init-container-sa"
+            imagePullSecrets:
+              - name: "{{ pull_secret_name }}"
