@@ -94,7 +94,7 @@
             rules:
               - alert: "{{ app[0]|upper }}{{ app[1:] }}PodRestartingTooOften"
                 expr: >
-                  increase(kube_pod_container_status_restarts_total{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-.*", pod!~"{{ app }}-(sync|redis).*"}[30m]) > 3
+                  increase(kube_pod_container_status_restarts_total{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-.*", pod!~"{{ app }}-(sync|redis|exporter).*"}[30m]) > 3
                 for: 5m
                 labels:
                   severity: critical
@@ -107,7 +107,7 @@
 
               - alert: "{{ app[0]|upper }}{{ app[1:] }}PodMissing"
                 expr: >
-                  absent(kube_pod_info{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-[^(sync|redis)].*"}) == 1
+                  absent(kube_pod_info{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-[^(sync|redis|exporter)].*"}) == 1
                 for: 15s
                 labels:
                   severity: critical
@@ -120,9 +120,9 @@
 
               - alert: "{{ app[0]|upper }}{{ app[1:] }}PodNotReady"
                 expr: >
-                  sum by (pod) (kube_pod_status_phase{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-[^(sync|redis)].*", phase=~"Running|Pending"}) > 0
+                  sum by (pod) (kube_pod_status_phase{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-[^(sync|redis|exporter)].*", phase=~"Running|Pending"}) > 0
                   and
-                  sum by (pod) (kube_pod_status_ready{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-[^(sync|redis)].*", condition="true"}) == 0
+                  sum by (pod) (kube_pod_status_ready{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-[^(sync|redis|exporter)].*", condition="true"}) == 0
                 for: 15s
                 labels:
                   severity: critical
@@ -135,7 +135,7 @@
 
               - alert: "{{ app[0]|upper }}{{ app[1:] }}PodCrashLoopBackOff"
                 expr: >
-                  sum by (pod) (kube_pod_container_status_waiting_reason{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-[^(sync|redis)].*", reason="CrashLoopBackOff"}) > 0
+                  sum by (pod) (kube_pod_container_status_waiting_reason{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-[^(sync|redis|exporter)].*", reason="CrashLoopBackOff"}) > 0
                 for: 15s
                 labels:
                   severity: critical
@@ -145,6 +145,48 @@
                   summary: "{{ app }} pod is in CrashLoopBackOff"
                   description: >-
                     The {{ app }} application pod is in CrashLoopBackOff state for more than 15 seconds.
+
+          - name: "{{ app }}-exporter"
+            rules:
+              - alert: "{{ app[0]|upper }}{{ app[1:] }}ExporterPodMissing"
+                expr: >
+                  absent(kube_pod_info{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-exporter-.*"})
+                for: 15s
+                labels:
+                  severity: critical
+                  sendto: telegram
+                  app: "{{ app }}"
+                annotations:
+                  summary: "{{ app }} Exporter pod is missing"
+                  description: >-
+                    No {{ app }} Exporter pod is running for more than 15 seconds.
+
+              - alert: "{{ app[0]|upper }}{{ app[1:] }}ExporterPodNotReady"
+                expr: >
+                  sum by (pod) (kube_pod_status_phase{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-exporter-.*", phase=~"Running|Pending"}) > 0
+                  and
+                  sum by (pod) (kube_pod_status_ready{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-exporter-.*", condition="true"}) == 0
+                for: 15s
+                labels:
+                  severity: critical
+                  sendto: telegram
+                  app: "{{ app }}"
+                annotations:
+                  summary: "{{ app }} Exporter pod is not ready"
+                  description: >-
+                    The {{ app }} Exporter pod is running but not ready for more than 15 seconds.
+              - alert: "{{ app[0]|upper }}{{ app[1:] }}ExporterPodCrashLoopBackOff"
+                expr: >
+                  sum by (pod) (kube_pod_container_status_waiting_reason{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-exporter-.*", reason="CrashLoopBackOff"}) > 0
+                for: 2m
+                labels:
+                  severity: critical
+                  sendto: telegram
+                  app: "{{ app }}"
+                annotations:
+                  summary: "{{ app }} Exporter pod is in CrashLoopBackOff"
+                  description: >-
+                    The {{ app }} Exporter pod is in CrashLoopBackOff state. Check pod logs and events.
 
           - name: "{{ app }}-redis-alerts"
             rules:
@@ -188,6 +230,109 @@
                   summary: "{{ app }} Redis pod is in CrashLoopBackOff"
                   description: >-
                     The {{ app }} Redis pod is in CrashLoopBackOff state. Check pod logs and events.
+
+- name: Create Outline Exporter Deployment
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: "{{ app }}-exporter"
+        namespace: "{{ openshift_namespace }}"
+        labels:
+          app: "{{ app }}-exporter"
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: "{{ app }}-exporter"
+        template:
+          metadata:
+            labels:
+              app: "{{ app }}-exporter"
+              monitoring: "true"
+            annotations:
+              prometheus.io/scrape: "true"
+              prometheus.io/port: "9877"
+              prometheus.io/path: "/metrics"
+          spec:
+            containers:
+              - name: outline-exporter
+                image: "{{ registry }}/{{ organisation }}/{{ app }}-exporter:1.0.1"
+                imagePullPolicy: Always
+                ports:
+                  - containerPort: 9877
+                    name: metrics
+                env:
+                  - name: OUTLINE_API_URL
+                    value: "https://{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}"
+                  - name: OUTLINE_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: "{{ app }}-api-key-monitoring"
+                        key: API_KEY
+                resources:
+                  requests:
+                    cpu: "100m"
+                    memory: "128Mi"
+                  limits:
+                    cpu: "200m"
+                    memory: "256Mi"
+                livenessProbe:
+                  httpGet:
+                    path: /metrics
+                    port: metrics
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+                readinessProbe:
+                  httpGet:
+                    path: /metrics
+                    port: metrics
+                  initialDelaySeconds: 5
+                  periodSeconds: 10
+            imagePullSecrets:
+              - name: "{{ pull_secret_name }}"
+
+- name: Create Outline Exporter Service
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: "{{ app }}-exporter"
+        namespace: "{{ openshift_namespace }}"
+        labels:
+          app: "{{ app }}-exporter"
+      spec:
+        ports:
+          - name: metrics
+            port: 9877
+            targetPort: metrics
+        selector:
+          app: "{{ app }}-exporter"
+
+- name: Create ServiceMonitor for Outline Exporter
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: monitoring.coreos.com/v1
+      kind: ServiceMonitor
+      metadata:
+        name: "{{ app }}-exporter"
+        namespace: "{{ openshift_namespace }}"
+        labels:
+          app: "{{ app }}-exporter"
+          release: prometheus-operator
+      spec:
+        endpoints:
+          - port: metrics
+            interval: 30s
+            path: /metrics
+        selector:
+          matchLabels:
+            app: "{{ app }}-exporter"
+        namespaceSelector:
+          matchNames:
+            - "{{ openshift_namespace }}"
 
 - name: Deploy Probe for HTTP endpoint monitoring
   kubernetes.core.k8s:
