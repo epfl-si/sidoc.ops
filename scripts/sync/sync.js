@@ -142,7 +142,7 @@ class OutlineSync {
 	 * @returns {Array} - List of active users
 	 */
 	async getAllUsers() {
-		const response = await this.outlineClient.post('/api/users.list');
+		const response = await this.outlineClient.post('/api/users.list', { limit: 100 });
 		const activeUsers = response.data.data.filter((user) => user.email !== (process.env.OUTLINE_ADMIN_EMAIL || 'admin@epfl.ch'));
 
 		logger.info('Retrieved active users', { count: activeUsers.length });
@@ -154,7 +154,7 @@ class OutlineSync {
 	 * @returns {Array} - List of groups
 	 */
 	async getAllGroups() {
-		const response = await this.outlineClient.post('/api/groups.list');
+		const response = await this.outlineClient.post('/api/groups.list', { limit: 100 });
 		const groups = response.data.data.groups;
 
 		logger.info('Retrieved groups', { count: groups.length });
