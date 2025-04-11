@@ -10,6 +10,7 @@
 # - https://www.ansible.com/overview/how-ansible-works
 # - https://github.com/jdauphant/awesome-ansible
 
+export ANSIBLE_JINJA2_NATIVE=true
 set -e
 cd "$(cd "$(dirname "$0")"; pwd)"
 
