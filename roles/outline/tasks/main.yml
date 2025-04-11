@@ -43,6 +43,15 @@
   tags:
     - outline.web
 
+- name: Deploy the init job
+  include_tasks:
+    file: init.yml
+    apply:
+      tags:
+        - outline.init
+  tags:
+    - outline.init
+
 - name: Deploy the syncer
   include_tasks:
     file: syncer.yml
