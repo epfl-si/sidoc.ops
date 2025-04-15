@@ -153,7 +153,7 @@
                   absent(kube_pod_info{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-exporter-.*"})
                 for: 1m
                 labels:
-                  severity: critical
+                  severity: warning
                   sendto: telegram
                   app: "{{ app }}"
                 annotations:
@@ -168,7 +168,7 @@
                   sum by (pod) (kube_pod_status_ready{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-exporter-.*", condition="true"}) == 0
                 for: 1m
                 labels:
-                  severity: critical
+                  severity: warning
                   sendto: telegram
                   app: "{{ app }}"
                 annotations:
@@ -180,7 +180,7 @@
                   sum by (pod) (kube_pod_container_status_waiting_reason{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-exporter-.*", reason="CrashLoopBackOff"}) > 0
                 for: 2m
                 labels:
-                  severity: critical
+                  severity: warning
                   sendto: telegram
                   app: "{{ app }}"
                 annotations:
@@ -325,7 +325,7 @@
       spec:
         endpoints:
           - port: metrics
-            interval: 30s
+            interval: 5m
             path: /metrics
         selector:
           matchLabels:
@@ -360,7 +360,6 @@
           - targetLabel: job
             replacement: "{{ app }}-probe"
 
-# Create a PrometheusRule for the Probe alerts
 - name: Create PrometheusRule for Probe Alerts
   kubernetes.core.k8s:
     definition:
