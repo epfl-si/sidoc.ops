@@ -39,6 +39,8 @@
       metadata:
         name: "{{ app }}-redis"
         namespace: "{{ openshift_namespace }}"
+        labels:
+          app: "{{ app }}"
       spec:
         replicas: 1
         selector:

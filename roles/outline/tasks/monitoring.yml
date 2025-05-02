@@ -123,7 +123,7 @@
                   sum by (pod) (kube_pod_status_phase{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-[^(sync|redis|exporter)].*", phase=~"Running|Pending"}) > 0
                   and
                   sum by (pod) (kube_pod_status_ready{namespace="{{ openshift_namespace }}", pod=~"{{ app }}-[^(sync|redis|exporter)].*", condition="true"}) == 0
-                for: 15s
+                for: 45s
                 labels:
                   severity: critical
                   sendto: telegram
@@ -240,7 +240,7 @@
         name: "{{ app }}-exporter"
         namespace: "{{ openshift_namespace }}"
         labels:
-          app: "{{ app }}-exporter"
+          app: "{{ app }}"
       spec:
         replicas: 1
         selector:
@@ -278,12 +278,6 @@
                   limits:
                     cpu: "200m"
                     memory: "256Mi"
-                livenessProbe:
-                  httpGet:
-                    path: /metrics
-                    port: metrics
-                  initialDelaySeconds: 30
-                  periodSeconds: 10
                 readinessProbe:
                   httpGet:
                     path: /metrics
@@ -411,7 +405,6 @@
                   description: >-
                     The SSL certificate for {{ app }} will expire in less than 14 days.
 
-#
 - name: Deploy Blackbox Exporter ConfigMap
   kubernetes.core.k8s:
     definition:
