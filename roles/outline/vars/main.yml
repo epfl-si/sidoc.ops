@@ -1,8 +1,9 @@
 registry: quay-its.epfl.ch
 organisation: svc0070
 image: outlinewiki
-version: 0.82.5
+version: 0.82.9
 app: outlinewiki
+app_name: Collab
 subdomain: collab
 db_host: postgres-cluster-rw
 
@@ -14,6 +15,7 @@ git_repo_url: https://github.com/epfl-si/wiki.ops
 secrets: "{{ lookup('pipe', 'keybase fs read /keybase/team/epfl_wiki/secrets/outline.yml') | from_yaml }}"
 
 allowed_units:
+  # DSI
   - DSI-EMP
   - DSI-GE
   - INVENTAIRE-CRI
@@ -35,3 +37,23 @@ allowed_units:
   - ITOP-SDDC
   - ITOP-SDESK
   - ITOP-WSRV
+  # Library
+  - SISB-AIR
+  - SISB-CUBA
+  - SISB-SOAR
+  - SISB-SPICE
+  - SISB-USEP
+  - VPA-SISB-GE
+  # Centers
+  - C4DT
+  - IMAGING-GE
+  # Mediacom
+  - MEC
+  # IT Faculty Services
+  - CDH-IT
+  - CDM-IT
+  - ENAC-IT
+  - IC-IT
+  - SB-IT
+  - STI-IT
+  - SV-IT
