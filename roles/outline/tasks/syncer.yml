@@ -1,42 +1,31 @@
-- name: Create BuildConfig for sync image
+- name: Create config map for allowed units
   kubernetes.core.k8s:
+    state: present
     definition:
-      apiVersion: build.openshift.io/v1
-      kind: BuildConfig
+      apiVersion: v1
+      kind: ConfigMap
       metadata:
-        name: "{{ app }}-sync-build"
+        name: "{{ app }}-allowed-units"
         namespace: "{{ openshift_namespace }}"
-      spec:
-        output:
-          to:
-            kind: ImageStreamTag
-            name: "{{ app }}-sync:latest"
-        source:
-          git:
-            uri: "{{ git_repo_url }}"
-            ref: "main"
-          contextDir: "roles/outline/files"
-        strategy:
-          dockerStrategy:
-            dockerfilePath: Dockerfile
-        triggers:
-          - type: ConfigChange
-          - type: ImageChange
+      data:
+        "allowed-units.json": "{{ allowed_units | to_json }}"
 
-- name: Create ImageStream for sync
+- name: Ensure Sync Secret Exists
   kubernetes.core.k8s:
+    state: present
     definition:
-      apiVersion: image.openshift.io/v1
-      kind: ImageStream
+      apiVersion: v1
+      kind: Secret
       metadata:
         name: "{{ app }}-sync"
         namespace: "{{ openshift_namespace }}"
-
-- name: Start new build
-  ansible.builtin.shell:
-    cmd: "oc start-build {{ app }}-sync-build -n {{ openshift_namespace }} --follow"
-  vars:
-    ansible_become: false
+      type: Opaque
+      stringData:
+        OUTLINE_BASE_URL: "{{ ('https://' ~ subdomain ~ (env == 'test') | ternary('-test', '') ~ '.' ~ domain) }}"
+        EPFL_ALLOWED_UNITS_FILE: "/opt/allowed-units.json"
+        EPFL_API_URL: "{{ secrets[env].sync.epfl_api_url }}"
+        EPFL_API_PASSWORD: "{{ secrets[env].sync.epfl_api_password }}"
+        EPFL_API_USERNAME: "{{ secrets[env].sync.epfl_api_username }}"
 
 - name: Create Sync CronJob
   kubernetes.core.k8s:
@@ -57,7 +46,7 @@
               spec:
                 containers:
                   - name: "{{ app }}-sync"
-                    image: "{{ registry }}/{{ organisation }}/{{ app }}-sync:1.5.6"
+                    image: "{{ registry }}/{{ organisation }}/{{ app }}-sync:1.6.7"
                     imagePullPolicy: Always
                     envFrom:
                       - secretRef:
@@ -75,22 +64,15 @@
                       limits:
                         cpu: 300m
                         memory: 512Mi
+                    volumeMounts:
+                      - name: allowed-units-volume
+                        mountPath: "/opt/allowed-units.json"
+                        subPath: "allowed-units.json"
+                        readOnly: true
                 restartPolicy: OnFailure
+                volumes:
+                  - name: allowed-units-volume
+                    configMap:
+                      name: "{{ app }}-allowed-units"
                 imagePullSecrets:
                   - name: "{{ pull_secret_name }}"
-
-- name: Ensure Sync Secret Exists
-  kubernetes.core.k8s:
-    state: present
-    definition:
-      apiVersion: v1
-      kind: Secret
-      metadata:
-        name: "{{ app }}-sync"
-        namespace: "{{ openshift_namespace }}"
-      type: Opaque
-      data:
-        OUTLINE_BASE_URL: "{{ ('https://' ~ subdomain ~ (env == 'test') | ternary('-test', '') ~ '.' ~ domain) | b64encode }}"
-        EPFL_API_URL: "{{ secrets[env].sync.epfl_api_url | b64encode }}"
-        EPFL_API_PASSWORD: "{{ secrets[env].sync.epfl_api_password | b64encode }}"
-        EPFL_API_USERNAME: "{{ secrets[env].sync.epfl_api_username | b64encode }}"
