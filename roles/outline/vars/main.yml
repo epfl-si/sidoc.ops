@@ -12,3 +12,26 @@ pull_secret_name: "{{ organisation }}-pull-secret"
 git_repo_url: https://github.com/epfl-si/wiki.ops
 
 secrets: "{{ lookup('pipe', 'keybase fs read /keybase/team/epfl_wiki/secrets/outline.yml') | from_yaml }}"
+
+allowed_units:
+  - DSI-EMP
+  - DSI-GE
+  - INVENTAIRE-CRI
+  - ISAS-FSD
+  - ISAS-GE
+  - ISAS-GIF
+  - ISCS-BA
+  - ISCS-BI
+  - ISCS-ERP
+  - ISCS-GE
+  - ISCS-IAM
+  - ISGOV-BO
+  - ISGOV-GE
+  - ISGOV-ITSEC
+  - ISGOV-PM
+  - ITOP-GE
+  - ITOP-INFR
+  - ITOP-MWS
+  - ITOP-SDDC
+  - ITOP-SDESK
+  - ITOP-WSRV
