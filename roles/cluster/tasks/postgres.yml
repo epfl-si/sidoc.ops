@@ -20,6 +20,8 @@
                               name: s3-credentials
                               key: AWS_SECRET_ACCESS_KEY
               instances: 2
+              monitoring:
+                  enablePodMonitor: true
               storage:
                   size: "10Gi"
                   storageClass: "{{ storage_class_name }}"
