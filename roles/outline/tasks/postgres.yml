@@ -38,7 +38,7 @@
         name: "{{ app }}-scheduled-backup"
         namespace: "{{ openshift_namespace }}"
       spec:
-        schedule: "0 2 * * *"
+        schedule: "0 0 2 * * *"
         backupOwnerReference: self
         cluster:
           name: postgres-cluster
