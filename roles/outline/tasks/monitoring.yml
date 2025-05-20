@@ -258,7 +258,7 @@
           spec:
             containers:
               - name: outline-exporter
-                image: "{{ registry }}/{{ organisation }}/{{ app }}-exporter:1.2.0"
+                image: "{{ registry }}/{{ organisation }}/{{ app }}-exporter:1.3.1"
                 imagePullPolicy: Always
                 ports:
                   - containerPort: 9877
@@ -280,53 +280,38 @@
                     memory: "256Mi"
                 readinessProbe:
                   httpGet:
-                    path: /metrics
+                    path: /healthz
                     port: metrics
-                  initialDelaySeconds: 5
-                  periodSeconds: 10
+                    scheme: HTTP
+                livenessProbe:
+                  httpGet:
+                    path: /healthz
+                    port: metrics
+                    scheme: HTTP
             imagePullSecrets:
               - name: "{{ pull_secret_name }}"
 
-- name: Create Outline Exporter Service
-  kubernetes.core.k8s:
-    definition:
-      apiVersion: v1
-      kind: Service
-      metadata:
-        name: "{{ app }}-exporter"
-        namespace: "{{ openshift_namespace }}"
-        labels:
-          app: "{{ app }}-exporter"
-      spec:
-        ports:
-          - name: metrics
-            port: 9877
-            targetPort: metrics
-        selector:
-          app: "{{ app }}-exporter"
-
-- name: Create ServiceMonitor for Outline Exporter
+- name: Create PodMonitor for Outline Exporter
   kubernetes.core.k8s:
     definition:
       apiVersion: monitoring.coreos.com/v1
-      kind: ServiceMonitor
+      kind: PodMonitor
       metadata:
         name: "{{ app }}-exporter"
         namespace: "{{ openshift_namespace }}"
         labels:
           app: "{{ app }}-exporter"
-          release: prometheus-operator
       spec:
-        endpoints:
-          - port: metrics
-            interval: 5m
-            path: /metrics
         selector:
           matchLabels:
             app: "{{ app }}-exporter"
         namespaceSelector:
           matchNames:
             - "{{ openshift_namespace }}"
+        podMetricsEndpoints:
+          - port: metrics
+            interval: 1m
+            path: /metrics
 
 - name: Deploy Probe for HTTP endpoint monitoring
   kubernetes.core.k8s:
