@@ -3,7 +3,8 @@
   "version": "1.7.0",
   "main": "sync.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node sync.js"
   },
   "author": "",
   "license": "ISC",
