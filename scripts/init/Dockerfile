@@ -1,6 +1,6 @@
 FROM node:22
 WORKDIR /app
-COPY init.js /app/init.js
+COPY init.mjs /app/init.mjs
 COPY package.json /app/package.json
 RUN npm i
-CMD ["node", "init.js"]
+CMD ["node", "init.mjs"]
