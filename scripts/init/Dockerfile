@@ -1,5 +1,6 @@
 FROM node:22
 WORKDIR /app
-COPY init.mjs /app/init.mjs
-RUN npm install axios dotenv pg @kubernetes/client-node
-CMD ["node", "init.mjs"]
+COPY sync.js /app/sync.js
+COPY package.json /app/package.json
+RUN npm i
+CMD ["node", "sync.js"]
