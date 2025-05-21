@@ -8,7 +8,7 @@ on:
             - .github/outline-sync.yml
 env:
     PATH_TO_PACKAGE: 'scripts/sync'
-    APP_NAME: 'outline-sync'
+    APP_NAME: ' outlinewiki-sync'
     REPOSITORY: 'quay-its.epfl.ch/svc0070'
 jobs:
     get-version:
