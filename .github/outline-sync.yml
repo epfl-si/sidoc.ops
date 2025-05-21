@@ -3,9 +3,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - scripts/sync/**
-      - .github/outline-sync.yml
 env:
   PATH_TO_PACKAGE: "scripts/sync"
   APP_NAME: "outline-sync"
