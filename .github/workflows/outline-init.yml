@@ -1,4 +1,4 @@
-name: Build Docker image and Create Release
+name: Build Init Docker Image
 on:
     push:
         branches:
