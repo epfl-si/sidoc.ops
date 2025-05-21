@@ -78,8 +78,6 @@ class OutlineSync {
 
 		this.ADMIN_EMAIL = process.env.OUTLINE_ADMIN_EMAIL || 'admin@epfl.ch';
 		this.ADMIN_GROUP_NAME = 'admin';
-		this.DELETED_PREFIX = '[deleted] ';
-		this.DELETE_PREFIX = '[delete] ';
 		this.ALLOWED_COLLECTIONS = process.env.ALLOWED_COLLECTIONS ? process.env.ALLOWED_COLLECTIONS.split(',') : ['welcome'];
 	}
 
@@ -538,54 +536,6 @@ class OutlineSync {
 	}
 
 	/**
-	 * Check if a name has a deletion prefix
-	 * @param {String} name - Name to check
-	 * @returns {Boolean} - Whether the name has a deletion prefix
-	 */
-	hasDeletePrefix(name) {
-		return name.startsWith(this.DELETE_PREFIX);
-	}
-
-	/**
-	 * Check if a name has a deleted prefix
-	 * @param {String} name - Name to check
-	 * @returns {Boolean} - Whether the name has a deleted prefix
-	 */
-	hasDeletedPrefix(name) {
-		return name.startsWith(this.DELETED_PREFIX);
-	}
-
-	/**
-	 * Remove delete prefix from a name
-	 * @param {String} name - Name with prefix
-	 * @returns {String} - Name without prefix
-	 */
-	removeDeletePrefix(name) {
-		return name.replace(this.DELETE_PREFIX, '');
-	}
-
-	/**
-	 * Remove deleted prefix from a name
-	 * @param {String} name - Name with prefix
-	 * @returns {String} - Name without prefix
-	 */
-	removeDeletedPrefix(name) {
-		return name.replace(this.DELETED_PREFIX, '');
-	}
-
-	/**
-	 * Add deleted prefix to a name
-	 * @param {String} name - Original name
-	 * @returns {String} - Name with deleted prefix
-	 */
-	addDeletedPrefix(name) {
-		if (this.hasDeletedPrefix(name)) {
-			return name;
-		}
-		return `${this.DELETED_PREFIX}${name}`;
-	}
-
-	/**
 	 * Delete a group
 	 * @param {String} groupId - Group ID
 	 * @returns {Boolean} - Success status
@@ -594,6 +544,18 @@ class OutlineSync {
 		logger.info('Deleting group', { groupId });
 		await this.outlineClient.post('/api/groups.delete', { id: groupId });
 		logger.info('Group deleted successfully', { groupId });
+		return true;
+	}
+
+	/**
+	 * Delete a collection
+	 * @param {String} collectionId - Collection ID
+	 * @returns {Boolean} - Success status
+	 */
+	async deleteCollection(collectionId) {
+		logger.info('Deleting collection', { collectionId });
+		await this.outlineClient.post('/api/collections.delete', { id: collectionId });
+		logger.info('Collection deleted successfully', { collectionId });
 		return true;
 	}
 
@@ -608,8 +570,7 @@ class OutlineSync {
 			return true;
 		}
 
-		const cleanName = this.removeDeletedPrefix(collection.name);
-		return groupNames.includes(cleanName.toLowerCase());
+		return groupNames.includes(collection.name.toLowerCase());
 	}
 
 	/**
@@ -674,12 +635,6 @@ class OutlineSync {
 
 					if (!group) {
 						group = await this.createGroup(unit.name);
-					} else if (this.hasDeletedPrefix(group.name)) {
-						await this.updateGroupName(group.id, this.removeDeletedPrefix(group.name));
-					} else if (this.hasDeletePrefix(group.name)) {
-						await this.deleteGroup(group.id);
-						logger.info('Group was marked for deletion and has been removed', { groupName: group.name });
-						continue;
 					}
 
 					await this.addUserToGroup(user.id, group.id);
@@ -701,32 +656,24 @@ class OutlineSync {
 			}
 
 			for (const group of existingGroups) {
-				const groupNameLower = this.removeDeletedPrefix(group.name).toLowerCase();
+				const groupNameLower = group.name.toLowerCase();
 
 				if (groupNameLower === this.ADMIN_GROUP_NAME.toLowerCase()) {
 					continue;
 				}
 
 				if (!validGroupNames.has(groupNameLower)) {
-					if (this.hasDeletePrefix(group.name)) {
-						await this.deleteGroup(group.id);
-						logger.info('Group was marked for deletion and has been removed', { groupName: group.name });
-					} else if (!this.hasDeletedPrefix(group.name)) {
-						await this.updateGroupName(group.id, this.addDeletedPrefix(group.name));
-						logger.info('Group marked as deleted', {
-							oldName: group.name,
-							newName: this.addDeletedPrefix(group.name),
-						});
-					}
+					await this.deleteGroup(group.id);
+					logger.info('Group deleted as it is no longer needed', { groupName: group.name });
 				}
 			}
 
 			for (const group of existingGroups) {
-				const cleanGroupName = this.removeDeletedPrefix(group.name);
+				const groupName = group.name;
 
 				const groupMembers = await this.getGroupMembers(group.id);
 
-				if (cleanGroupName.toLowerCase() === this.ADMIN_GROUP_NAME.toLowerCase()) {
+				if (groupName.toLowerCase() === this.ADMIN_GROUP_NAME.toLowerCase()) {
 					for (const member of groupMembers) {
 						const isAdmin = admins.some((admin) => admin.email === member.email);
 						if (!isAdmin) {
@@ -741,7 +688,7 @@ class OutlineSync {
 						if (!user) continue;
 
 						const memberUnits = userUnitsMap[user.email] || [];
-						const shouldBeInGroup = memberUnits.some((unit) => unit.name.toLowerCase() === cleanGroupName.toLowerCase());
+						const shouldBeInGroup = memberUnits.some((unit) => unit.name.toLowerCase() === groupName.toLowerCase());
 
 						if (!shouldBeInGroup) {
 							logger.info('Removing user from group they no longer belong to', {
@@ -849,7 +796,7 @@ class OutlineSync {
 			const collections = await this.getAllCollections();
 			const adminGroup = await this.ensureAdminGroup();
 
-			const groupNames = groups.filter((g) => g.name.toLowerCase() !== this.ADMIN_GROUP_NAME.toLowerCase()).map((g) => this.removeDeletedPrefix(g.name).toLowerCase());
+			const groupNames = groups.filter((g) => g.name.toLowerCase() !== this.ADMIN_GROUP_NAME.toLowerCase()).map((g) => g.name.toLowerCase());
 
 			logger.info('Starting collection synchronization', {
 				groupsCount: groups.length,
@@ -861,53 +808,33 @@ class OutlineSync {
 					continue;
 				}
 
-				const cleanGroupName = this.removeDeletedPrefix(group.name);
-
-				if (this.hasDeletePrefix(group.name)) {
-					continue;
-				}
-
-				let collection = await this.findCollectionByName(cleanGroupName);
+				let collection = await this.findCollectionByName(group.name);
 
 				if (!collection) {
-					collection = await this.createCollection(cleanGroupName, false);
-				} else if (this.hasDeletedPrefix(collection.name) && !this.hasDeletedPrefix(group.name)) {
-					await this.updateCollection(collection.id, cleanGroupName, true);
+					collection = await this.createCollection(group.name, false);
 				}
 
 				await this.addGroupToCollection(group.id, collection.id, 'read_write');
 			}
 
 			for (const collection of collections) {
-				const cleanCollectionName = this.removeDeletedPrefix(collection.name);
-				const matchingGroup = groups.find((g) => {
-					const cleanGroupName = this.removeDeletedPrefix(g.name);
-					return cleanGroupName.toLowerCase() === cleanCollectionName.toLowerCase();
-				});
+				const collectionName = collection.name.toLowerCase();
 
-				if (cleanCollectionName.toLowerCase() === this.ADMIN_GROUP_NAME.toLowerCase()) {
+				if (collectionName === this.ADMIN_GROUP_NAME.toLowerCase()) {
 					continue;
 				}
 
-				if (this.ALLOWED_COLLECTIONS.includes(cleanCollectionName.toLowerCase())) {
+				if (this.ALLOWED_COLLECTIONS.includes(collectionName)) {
 					continue;
 				}
 
-				if (!matchingGroup && !this.hasDeletedPrefix(collection.name)) {
-					const deletedName = this.addDeletedPrefix(collection.name);
-					await this.updateCollection(collection.id, deletedName, true);
+				const hasMatchingGroup = groupNames.includes(collectionName);
 
-					await this.addGroupToCollection(adminGroup.id, collection.id, 'read_write');
-
-					logger.info('Collection marked as deleted and assigned to admin group', {
-						oldName: collection.name,
-						newName: deletedName,
+				if (!hasMatchingGroup) {
+					await this.deleteCollection(collection.id);
+					logger.info('Collection deleted as it no longer has a corresponding group', {
+						collectionName: collection.name,
 					});
-				}
-
-				if (!matchingGroup) {
-					await this.makeCollectionPrivate(collection.id);
-					await this.addGroupToCollection(adminGroup.id, collection.id, 'read_write');
 				}
 			}
 
