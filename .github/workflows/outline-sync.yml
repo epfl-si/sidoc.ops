@@ -100,7 +100,7 @@ jobs:
             - name: Build and push Docker image
               uses: docker/build-push-action@v5
               with:
-                  context: .
+                  context: ${{ env.PATH_TO_PACKAGE }}
                   file: ${{ env.PATH_TO_PACKAGE }}/Dockerfile
                   push: true
                   tags: ${{ steps.meta.outputs.tags }}
