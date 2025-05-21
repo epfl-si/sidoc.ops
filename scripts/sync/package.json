@@ -6,6 +6,10 @@
     "start": "node sync.js"
   },
   "author": "",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/epfl-si/wiki.ops.git"
+  },
   "license": "ISC",
   "description": "",
   "dependencies": {
