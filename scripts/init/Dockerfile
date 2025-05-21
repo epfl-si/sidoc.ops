@@ -1,6 +1,6 @@
 FROM node:22
 WORKDIR /app
-COPY sync.js /app/sync.js
+COPY init.js /app/init.js
 COPY package.json /app/package.json
 RUN npm i
-CMD ["node", "sync.js"]
+CMD ["node", "init.js"]
