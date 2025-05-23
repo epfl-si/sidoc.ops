@@ -191,32 +191,13 @@ class OutlineSync {
 	 */
 	async getAllAdmins() {
 		try {
-			const fetchAdminsRecursively = async (group, visitedGroups = new Set()) => {
-				if (visitedGroups.has(group)) {
-					return [];
-				}
-				visitedGroups.add(group);
+			const adminGroupName = process.env.OUTLINE_ADMIN_GROUP;
+			const response = await this.epflClient.get(`/groups/${adminGroupName}/members?recursive=1`);
+			const members = response.data.members || [];
 
-				const response = await this.epflClient.get(`/groups/${group}/members`);
-				const members = response.data.members || [];
+			const admins = members.filter((member) => member.type === 'person').map((member) => ({ id: member.id, email: member.email }));
 
-				let admins = [];
-				for (const member of members) {
-					if (member.type === 'person') {
-						admins.push({ id: member.id, email: member.email });
-					} else if (member.type === 'group') {
-						const subGroupAdmins = await fetchAdminsRecursively(member.id, visitedGroups);
-						admins = admins.concat(subGroupAdmins);
-					}
-				}
-
-				return admins;
-			};
-
-			const adminGroupName = process.env.OUTLINE_ADMIN_GROUP || 'wiki-admins';
-			const allAdmins = await fetchAdminsRecursively(adminGroupName, new Set());
-
-			const uniqueAdmins = Array.from(new Map(allAdmins.map((admin) => [admin.id, admin])).values());
+			const uniqueAdmins = Array.from(new Map(admins.map((admin) => [admin.id, admin])).values());
 
 			logger.info('Retrieved admin users', {
 				count: uniqueAdmins.length,
