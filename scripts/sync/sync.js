@@ -861,7 +861,7 @@ async function main() {
 	let exitCode = 0;
 
 	try {
-		const requiredEnvVars = ['OUTLINE_BASE_URL', 'OUTLINE_API_TOKEN', 'EPFL_API_URL', 'EPFL_API_USERNAME', 'EPFL_API_PASSWORD'];
+		const requiredEnvVars = ['OUTLINE_BASE_URL', 'OUTLINE_API_TOKEN', 'EPFL_API_URL', 'EPFL_API_USERNAME', 'EPFL_API_PASSWORD', 'OUTLINE_ADMIN_GROUP'];
 
 		const missingVars = requiredEnvVars.filter((varName) => !process.env[varName]);
 
