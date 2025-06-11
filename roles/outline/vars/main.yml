@@ -1,10 +1,10 @@
 registry: quay-its.epfl.ch
 organisation: svc0070
 image: outlinewiki
-version: 0.82.9
+version: 0.84.9
 app: outlinewiki
-app_name: Collab
-subdomain: collab
+app_name: SiDoc
+subdomain: sidoc
 db_host: postgres-cluster-rw
 
 storage_class: wiki
