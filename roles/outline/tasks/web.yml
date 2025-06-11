@@ -135,20 +135,14 @@
                   kind: Deployment
                   name: "{{ app }}-web"
               minReplicas: 2
-              maxReplicas: 10
+              maxReplicas: 4
               metrics:
-                  - type: Resource
-                    resource:
-                        name: cpu
-                        target:
-                            type: Utilization
-                            averageUtilization: 70
                   - type: Resource
                     resource:
                         name: memory
                         target:
                             type: Utilization
-                            averageUtilization: 80
+                            averageUtilization: 95
               behavior:
                   scaleUp:
                       stabilizationWindowSeconds: 60
