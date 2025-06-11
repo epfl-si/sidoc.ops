@@ -241,16 +241,18 @@
         namespace: "{{ openshift_namespace }}"
         labels:
           app: "{{ app }}"
+          component: "exporter"
       spec:
         replicas: 1
         selector:
           matchLabels:
-            app: "{{ app }}-exporter"
+            app: "{{ app }}"
+            component: "exporter"
         template:
           metadata:
             labels:
-              app: "{{ app }}-exporter"
-              monitoring: "true"
+              app: "{{ app }}"
+              component: "exporter"
             annotations:
               prometheus.io/scrape: "true"
               prometheus.io/port: "9877"
@@ -273,11 +275,11 @@
                         key: API_KEY
                 resources:
                   requests:
-                    cpu: "100m"
-                    memory: "128Mi"
+                    cpu: "10m"
+                    memory: "32Mi"
                   limits:
-                    cpu: "200m"
-                    memory: "256Mi"
+                    cpu: "50m"
+                    memory: "64Mi"
                 readinessProbe:
                   httpGet:
                     path: /healthz
@@ -300,11 +302,13 @@
         name: "{{ app }}-exporter"
         namespace: "{{ openshift_namespace }}"
         labels:
-          app: "{{ app }}-exporter"
+          app: "{{ app }}"
+          component: "exporter"
       spec:
         selector:
           matchLabels:
-            app: "{{ app }}-exporter"
+            app: "{{ app }}"
+            component: "exporter"
         namespaceSelector:
           matchNames:
             - "{{ openshift_namespace }}"
