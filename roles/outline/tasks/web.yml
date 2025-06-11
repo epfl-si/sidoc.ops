@@ -1,110 +1,72 @@
-- name: Create internal Kubernetes service for wiki application
+- name: Create internal Kubernetes service for wiki web application
   kubernetes.core.k8s:
       definition:
           apiVersion: v1
           kind: Service
           metadata:
-              name: "{{ app }}"
+              name: "{{ app }}-web"
               namespace: "{{ openshift_namespace }}"
           spec:
               selector:
                   app: "{{ app }}"
+                  component: web
               ports:
-                  - name: "{{ app }}-svc-port"
+                  - name: "{{ app }}-web-port"
                     protocol: TCP
                     port: 80
                     targetPort: 3000
 
-- name: Configure Nginx Ingress for external wiki access
-  kubernetes.core.k8s:
-      definition:
-          apiVersion: networking.k8s.io/v1
-          kind: Ingress
-          metadata:
-              name: "{{ app }}"
-              namespace: "{{ openshift_namespace }}"
-              labels:
-                  app: "{{ app }}"
-                  route: public
-              annotations:
-                  nginx.ingress.kubernetes.io/rewrite-target: /
-                  kubernetes.io/ingress.class: nginx
-                  nginx.ingress.kubernetes.io/ssl-redirect: "true"
-          spec:
-              rules:
-                  - host: "{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}"
-                    http:
-                        paths:
-                            - path: /
-                              pathType: Prefix
-                              backend:
-                                  service:
-                                      name: "{{ app }}"
-                                      port:
-                                          number: 80
-
-- name: Create OpenShift Route for external wiki access
+- name: Create OpenShift Route for external wiki web access
   kubernetes.core.k8s:
       definition:
           apiVersion: route.openshift.io/v1
           kind: Route
           metadata:
-              name: "{{ app }}"
+              name: "{{ app }}-web"
               namespace: "{{ openshift_namespace }}"
               labels:
                   app: "{{ app }}"
+                  component: web
                   route: private
           spec:
               host: "{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}"
               to:
                   kind: Service
-                  name: "{{ app }}"
+                  name: "{{ app }}-web"
               port:
-                  targetPort: "{{ app }}-svc-port"
+                  targetPort: "{{ app }}-web-port"
               tls:
                   termination: edge
                   insecureEdgeTerminationPolicy: Redirect
 
-- name: Create a PVC for uploads
-  kubernetes.core.k8s:
-      state: present
-      definition:
-          apiVersion: v1
-          kind: PersistentVolumeClaim
-          metadata:
-              name: "{{ app }}-uploads"
-              namespace: "{{ openshift_namespace }}"
-          spec:
-              accessModes:
-                  - ReadWriteMany
-              storageClassName: "{{ storage_class }}"
-              resources:
-                  requests:
-                      storage: 10Gi
-
-- name: Deploy wiki application
+- name: Deploy wiki web application with all services except collaboration
   kubernetes.core.k8s:
       definition:
           apiVersion: apps/v1
           kind: Deployment
           metadata:
-              name: "{{ app }}"
+              name: "{{ app }}-web"
               namespace: "{{ openshift_namespace }}"
               labels:
                   app: "{{ app }}"
+                  component: web
           spec:
-              replicas: 1
+              replicas: >-
+                  {{ 1 if env == 'test' else 2 }}
               strategy:
                   type: RollingUpdate
                   rollingUpdate:
                       maxUnavailable: 1
+                      maxSurge: 1
               selector:
                   matchLabels:
                       app: "{{ app }}"
+                      component: web
               template:
                   metadata:
                       labels:
                           app: "{{ app }}"
+                          component: web
                   spec:
                       volumes:
                           - name: yarn-cache
@@ -115,7 +77,7 @@
                       containers:
                           - image: "{{ registry }}/{{ organisation }}/{{ image }}:{{ version }}"
                             imagePullPolicy: Always
-                            name: "{{ app }}"
+                            name: "{{ app }}-web"
                             ports:
                                 - containerPort: 3000
                             env:
@@ -124,30 +86,204 @@
                                 - name: URL
                                   value: "https://{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}"
                                 - name: COLLABORATION_URL
-                                  value: "https://{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}/collaboration"
+                                  value: "wss://{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}/collaboration"
+                                - name: WEB_CONCURRENCY
+                                  value: "1"
+                                - name: SERVICES
+                                  value: "web,websockets,worker"
+                            envFrom:
+                                - secretRef:
+                                      name: "{{ app }}-secrets"
+                            resources:
+                                requests:
+                                    cpu: 128m
+                                    memory: 1024Mi
+                                limits:
+                                    cpu: 245m
+                                    memory: 2048Mi
+                            readinessProbe:
+                                tcpSocket:
+                                    port: 3000
+                                initialDelaySeconds: 20
+                                timeoutSeconds: 5
+                                periodSeconds: 10
+                            livenessProbe:
+                                tcpSocket:
+                                    port: 3000
+                                initialDelaySeconds: 20
+                                timeoutSeconds: 5
+                                periodSeconds: 30
+                            volumeMounts:
+                                - name: yarn-cache
+                                  mountPath: /tmp/.yarn-cache
+                                - name: "{{ app }}-uploads"
+                                  mountPath: /var/lib/outline/data
+                      imagePullSecrets:
+                          - name: "{{ pull_secret_name }}"
+
+- name: Create HorizontalPodAutoscaler for web pods
+  kubernetes.core.k8s:
+      definition:
+          apiVersion: autoscaling/v2
+          kind: HorizontalPodAutoscaler
+          metadata:
+              name: "{{ app }}-web-hpa"
+              namespace: "{{ openshift_namespace }}"
+          spec:
+              scaleTargetRef:
+                  apiVersion: apps/v1
+                  kind: Deployment
+                  name: "{{ app }}-web"
+              minReplicas: 2
+              maxReplicas: 10
+              metrics:
+                  - type: Resource
+                    resource:
+                        name: cpu
+                        target:
+                            type: Utilization
+                            averageUtilization: 70
+                  - type: Resource
+                    resource:
+                        name: memory
+                        target:
+                            type: Utilization
+                            averageUtilization: 80
+              behavior:
+                  scaleUp:
+                      stabilizationWindowSeconds: 60
+                      policies:
+                          - type: Percent
+                            value: 100
+                            periodSeconds: 15
+                          - type: Pods
+                            value: 2
+                            periodSeconds: 60
+                      selectPolicy: Max
+                  scaleDown:
+                      stabilizationWindowSeconds: 300
+                      policies:
+                          - type: Percent
+                            value: 10
+                            periodSeconds: 60
+                      selectPolicy: Min
+
+- name: Create internal Kubernetes service for wiki collaboration
+  kubernetes.core.k8s:
+      definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+              name: "{{ app }}-collaboration"
+              namespace: "{{ openshift_namespace }}"
+          spec:
+              selector:
+                  app: "{{ app }}"
+                  component: collaboration
+              ports:
+                  - name: "{{ app }}-collab-port"
+                    protocol: TCP
+                    port: 80
+                    targetPort: 3000
+
+- name: Create OpenShift Route for collaboration WebSocket
+  kubernetes.core.k8s:
+      definition:
+          apiVersion: route.openshift.io/v1
+          kind: Route
+          metadata:
+              name: "{{ app }}-collaboration"
+              namespace: "{{ openshift_namespace }}"
+              labels:
+                  app: "{{ app }}"
+                  component: collaboration
+                  route: private
+              annotations:
+                  route.openshift.io/timeout: 3600s
+          spec:
+              host: "{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}"
+              path: /collaboration
+              to:
+                  kind: Service
+                  name: "{{ app }}-collaboration"
+              port:
+                  targetPort: "{{ app }}-collab-port"
+              tls:
+                  termination: edge
+                  insecureEdgeTerminationPolicy: Redirect
+
+- name: Deploy wiki collaboration service (single instance only)
+  kubernetes.core.k8s:
+      definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+              name: "{{ app }}-collaboration"
+              namespace: "{{ openshift_namespace }}"
+              labels:
+                  app: "{{ app }}"
+                  component: collaboration
+          spec:
+              replicas: 1
+              strategy:
+                  type: RollingUpdate
+                  rollingUpdate:
+                      maxUnavailable: 1
+                      maxSurge: 1
+              selector:
+                  matchLabels:
+                      app: "{{ app }}"
+                      component: collaboration
+              template:
+                  metadata:
+                      labels:
+                          app: "{{ app }}"
+                          component: collaboration
+                  spec:
+                      volumes:
+                          - name: yarn-cache
+                            emptyDir: {}
+                          - name: "{{ app }}-uploads"
+                            persistentVolumeClaim:
+                                claimName: "{{ app }}-uploads"
+                      containers:
+                          - image: "{{ registry }}/{{ organisation }}/{{ image }}:{{ version }}"
+                            imagePullPolicy: Always
+                            name: "{{ app }}-collaboration"
+                            ports:
+                                - containerPort: 3000
+                            env:
+                                - name: YARN_CACHE_FOLDER
+                                  value: /tmp/.yarn-cache
+                                - name: URL
+                                  value: "https://{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}"
+                                - name: WEB_CONCURRENCY
+                                  value: "1"
                             envFrom:
                                 - secretRef:
                                       name: "{{ app }}-secrets"
                             command: ["/bin/sh", "-c"]
                             args:
-                                - yarn start
+                                - yarn start --services=collaboration
                             resources:
                                 requests:
-                                    cpu: 100m
-                                    memory: 512Mi
+                                    cpu: 128m
+                                    memory: 256Mi
                                 limits:
-                                    cpu: 500m
-                                    memory: 1024Mi
+                                    cpu: 256m
+                                    memory: 512Mi
                             readinessProbe:
                                 tcpSocket:
                                     port: 3000
-                                initialDelaySeconds: 5
-                                timeoutSeconds: 3
+                                initialDelaySeconds: 20
+                                timeoutSeconds: 5
+                                periodSeconds: 10
                             livenessProbe:
                                 tcpSocket:
                                     port: 3000
-                                initialDelaySeconds: 5
-                                timeoutSeconds: 3
+                                initialDelaySeconds: 20
+                                timeoutSeconds: 5
+                                periodSeconds: 30
                             volumeMounts:
                                 - name: yarn-cache
                                   mountPath: /tmp/.yarn-cache
