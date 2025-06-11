@@ -10,6 +10,9 @@ db_host: postgres-cluster-rw
 storage_class: wiki
 pull_secret_name: "{{ organisation }}-pull-secret"
 
+db_name: "{{ app }}-db"
+db_user: "{{ app }}-user"
+
 git_repo_url: https://github.com/epfl-si/wiki.ops
 
 secrets: "{{ lookup('pipe', 'keybase fs read /keybase/team/epfl_wiki/secrets/outline.yml') | from_yaml }}"
