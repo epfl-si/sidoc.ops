@@ -22,6 +22,7 @@
       type: Opaque
       stringData:
         OUTLINE_BASE_URL: "{{ ('https://' ~ subdomain ~ (env == 'test') | ternary('-test', '') ~ '.' ~ domain) }}"
+        OUTLINE_ADMIN_GROUP: sidoc-admins
         EPFL_ALLOWED_UNITS_FILE: "/opt/allowed-units.json"
         EPFL_API_URL: "{{ secrets[env].sync.epfl_api_url }}"
         EPFL_API_PASSWORD: "{{ secrets[env].sync.epfl_api_password }}"
@@ -46,7 +47,7 @@
               spec:
                 containers:
                   - name: "{{ app }}-sync"
-                    image: "{{ registry }}/{{ organisation }}/{{ app }}-sync:1.6.7"
+                    image: "{{ registry }}/{{ organisation }}/{{ app }}-sync:1.7.1"
                     imagePullPolicy: Always
                     envFrom:
                       - secretRef:
@@ -59,10 +60,10 @@
                             key: "API_KEY"
                     resources:
                       requests:
-                        cpu: 100m
+                        cpu: 50m
                         memory: 256Mi
                       limits:
-                        cpu: 300m
+                        cpu: 100m
                         memory: 512Mi
                     volumeMounts:
                       - name: allowed-units-volume
