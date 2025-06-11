@@ -3,12 +3,16 @@
     definition:
       apiVersion: v1
       kind: Service
+      labels:
+        app: "{{ app }}"
+        component: redis
       metadata:
         name: "{{ app }}-redis"
         namespace: "{{ openshift_namespace }}"
       spec:
         selector:
-          app: "{{ app }}-redis"
+          app: "{{ app }}"
+          component: redis
         ports:
           - name: "{{ app }}-redis-svc-port"
             protocol: TCP
@@ -41,15 +45,18 @@
         namespace: "{{ openshift_namespace }}"
         labels:
           app: "{{ app }}"
+          component: redis
       spec:
         replicas: 1
         selector:
           matchLabels:
-            app: "{{ app }}-redis"
+            app: "{{ app }}"
+            component: redis
         template:
           metadata:
             labels:
-              app: "{{ app }}-redis"
+              app: "{{ app }}"
+              component: redis
           spec:
             containers:
               - name: redis
@@ -58,10 +65,10 @@
                   - containerPort: 6379
                 resources:
                   requests:
-                    cpu: "50m"
+                    cpu: "32m"
                     memory: "50Mi"
                   limits:
-                    cpu: "100m"
+                    cpu: "64m"
                     memory: "100Mi"
                 volumeMounts:
                   - name: redis-data
