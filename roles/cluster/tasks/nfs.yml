@@ -1,4 +1,4 @@
-- name: NfsSubdirExternalProvisioner's
+- name: Deploy NFS Subdir External Provisioner
   kubernetes.core.k8s:
     state: present
     definition:
@@ -16,5 +16,5 @@
           name: "{{ storage_class_name }}"
         resources:
           requests:
-            cpu: "100m"
-            memory: "128Mi"
+            cpu: "{{ nfs_provisioner.cpu_request }}"
+            memory: "{{ nfs_provisioner.memory_request }}"
