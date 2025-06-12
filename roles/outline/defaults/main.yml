@@ -32,34 +32,34 @@ resources:
     web:
       replicas: 1
       requests:
-        cpu: 64m
-        memory: 512Mi
+        cpu: 295m
+        memory: 590Mi
       limits:
-        memory: 1Gi
+        memory: 590Mi
     collaboration:
       requests:
-        cpu: 64m
-        memory: 512Mi
+        cpu: 295m
+        memory: 590Mi
       limits:
-        memory: 1Gi
+        memory: 590Mi
     redis:
       requests:
-        cpu: 16m
-        memory: 25Mi
+        cpu: 10m
+        memory: 100Mi
       limits:
-        memory: 50Mi
+        memory: 100Mi
     sync:
       requests:
         cpu: 25m
-        memory: 128Mi
+        memory: 64Mi
       limits:
-        memory: 256Mi
+        memory: 128Mi
     init:
       requests:
         cpu: 25m
-        memory: 128Mi
+        memory: 64Mi
       limits:
-        memory: 256Mi
+        memory: 128Mi
     exporter:
       requests:
         cpu: 5m
@@ -70,40 +70,40 @@ resources:
     web:
       replicas: 2
       requests:
-        cpu: 128m
-        memory: 1Gi
+        cpu: 135m
+        memory: 694Mi
       limits:
-        memory: 2Gi
+        memory: 694Mi
     collaboration:
       requests:
-        cpu: 128m
-        memory: 1Gi
+        cpu: 135m
+        memory: 694Mi
       limits:
-        memory: 2Gi
+        memory: 694Mi
     redis:
       requests:
-        cpu: 32m
-        memory: 50Mi
+        cpu: 10m
+        memory: 100Mi
       limits:
         memory: 100Mi
     sync:
       requests:
         cpu: 50m
-        memory: 256Mi
+        memory: 64Mi
       limits:
-        memory: 512Mi
+        memory: 128Mi
     init:
       requests:
         cpu: 50m
-        memory: 256Mi
+        memory: 64Mi
       limits:
-        memory: 512Mi
+        memory: 128Mi
     exporter:
       requests:
         cpu: 10m
-        memory: 32Mi
+        memory: 100Mi
       limits:
-        memory: 64Mi
+        memory: 100Mi
 
 # Autoscaling configuration
 autoscaling:
