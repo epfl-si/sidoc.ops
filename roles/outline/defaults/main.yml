@@ -2,7 +2,7 @@ app:
   name: outlinewiki
   display_name: SiDoc
   subdomain: sidoc
-  version: 0.84.9
+  version: 0.84.10
 
 # Registry configuration
 registry:
@@ -116,7 +116,7 @@ autoscaling:
 # Sync configuration
 sync:
   schedule: "30 * * * *"
-  image_version: 1.7.1
+  image_version: 1.8.1
   admin_group: sidoc-admins
 
 # Init configuration
