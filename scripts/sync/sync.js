@@ -128,6 +128,48 @@ class OutlineSync {
 		);
 	}
 
+	async _makeOutlineApiCall(method, endpoint, data = {}) {
+		try {
+			let results = [];
+			let offset = 0;
+			const limit = 100;
+			let total = null;
+			let firstResponse = null;
+
+			do {
+				const response = await this.outlineClient.post(endpoint, { ...data, limit, offset });
+				if (!firstResponse) firstResponse = response;
+				const pageData = response.data.data || [];
+				results = results.concat(pageData);
+
+				const pagination = response.data.pagination;
+				if (pagination) {
+					total = pagination.total;
+					offset += limit;
+				} else {
+					break;
+				}
+			} while (total !== null && results.length < total);
+
+			// Return the first response structure but with all results
+			if (firstResponse) {
+				return {
+					...firstResponse.data,
+					data: results,
+				};
+			}
+			return null;
+		} catch (error) {
+			logger.error('Error making Outline API call', {
+				method,
+				endpoint,
+				data,
+				error: error.message,
+			});
+			throw error;
+		}
+	}
+
 	/**
 	 * Get units for a user by email
 	 * @param {String} email - User email
@@ -166,8 +208,8 @@ class OutlineSync {
 	 * @returns {Array} - List of active users
 	 */
 	async getAllUsers() {
-		const response = await this.outlineClient.post('/api/users.list', { limit: 100 });
-		const activeUsers = response.data.data.filter((user) => user.email !== this.ADMIN_EMAIL);
+		const response = await this._makeOutlineApiCall('POST', '/api/users.list', {});
+		const activeUsers = response.data.filter((user) => user.email !== this.ADMIN_EMAIL);
 
 		logger.info('Retrieved active users', { count: activeUsers.length });
 		return activeUsers;
@@ -178,8 +220,8 @@ class OutlineSync {
 	 * @returns {Array} - List of groups
 	 */
 	async getAllGroups() {
-		const response = await this.outlineClient.post('/api/groups.list', { limit: 100 });
-		const groups = response.data.data.groups;
+		const response = await this._makeOutlineApiCall('POST', '/api/groups.list', {});
+		const groups = response.data.groups || response.data;
 
 		logger.info('Retrieved groups', { count: groups.length });
 		return groups;
@@ -263,8 +305,8 @@ class OutlineSync {
 	 * @returns {Array} - List of collections
 	 */
 	async getAllCollections() {
-		const response = await this.outlineClient.post('/api/collections.list', { limit: 100 });
-		const collections = response.data.data;
+		const response = await this._makeOutlineApiCall('POST', '/api/collections.list', {});
+		const collections = response.data;
 
 		logger.info('Retrieved collections', { count: collections.length });
 		return collections;
@@ -498,11 +540,8 @@ class OutlineSync {
 	 * @returns {Array} - List of users in the group
 	 */
 	async getGroupMembers(groupId) {
-		const response = await this.outlineClient.post('/api/groups.memberships', {
-			id: groupId,
-			limit: 100,
-		});
-		return response.data.data.users;
+		const response = await this._makeOutlineApiCall('POST', '/api/groups.memberships', { id: groupId });
+		return response.data.users || [];
 	}
 
 	/**
@@ -510,10 +549,8 @@ class OutlineSync {
 	 * @returns {Array} - List of admin users
 	 */
 	async getAllAdminUsers() {
-		const response = await this.outlineClient.post('/api/users.list', {
-			role: 'admin',
-		});
-		return response.data.data.filter((user) => user.email !== this.ADMIN_EMAIL);
+		const response = await this._makeOutlineApiCall('POST', '/api/users.list', { role: 'admin' });
+		return response.data.filter((user) => user.email !== this.ADMIN_EMAIL);
 	}
 
 	/**
