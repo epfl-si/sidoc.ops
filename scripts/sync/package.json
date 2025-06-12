@@ -1,6 +1,6 @@
 {
   "name": "sync",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "main": "sync.js",
   "scripts": {
     "start": "node sync.js"
