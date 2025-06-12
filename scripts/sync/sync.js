@@ -221,7 +221,7 @@ class OutlineSync {
 	 */
 	async getAllGroups() {
 		const response = await this._makeOutlineApiCall('POST', '/api/groups.list', {});
-		const groups = response.data.groups || response.data;
+		const groups = response.data.map((data) => data.groups || data).flat();
 
 		logger.info('Retrieved groups', { count: groups.length });
 		return groups;
