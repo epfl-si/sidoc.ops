@@ -1,16 +1,3 @@
-- name: Retrieve Database Credentials
-  kubernetes.core.k8s_info:
-    kind: Secret
-    namespace: "{{ openshift_namespace }}"
-    name: "{{ app }}-db-credentials"
-  register: db_secret
-
-- name: Set Database Variables
-  ansible.builtin.set_fact:
-    db:
-      name: "{{ db_secret.resources[0].data.database | b64decode }}"
-      user: "{{ db_secret.resources[0].data.username | b64decode }}"
-
 - name: Create Database in PostgreSQL Cluster
   kubernetes.core.k8s:
     state: present
@@ -18,24 +5,24 @@
       apiVersion: postgresql.cnpg.io/v1
       kind: Database
       metadata:
-        name: "{{ app }}"
+        name: "{{ app.name }}"
         namespace: "{{ openshift_namespace }}"
       spec:
         cluster:
           name: postgres-cluster
-        name: "{{ db.name }}"
-        owner: "{{ db.user }}"
+        name: "{{ app.name + database.name_suffix }}"
+        owner: "{{ app.name + database.user_suffix }}"
         passwordSecret:
-          name: "{{ app }}-db-credentials"
+          name: "{{ app.name }}-db-credentials"
 
-- name: Create schedule backup
+- name: Create scheduled backup
   kubernetes.core.k8s:
     state: present
     definition:
       kind: ScheduledBackup
       apiVersion: postgresql.cnpg.io/v1
       metadata:
-        name: "{{ app }}-scheduled-backup"
+        name: "{{ app.name }}-scheduled-backup"
         namespace: "{{ openshift_namespace }}"
       spec:
         schedule: "0 0 2 * * *"

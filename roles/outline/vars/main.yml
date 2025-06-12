@@ -1,62 +1,11 @@
-registry: quay-its.epfl.ch
-organisation: svc0070
-image: outlinewiki
-version: 0.84.9
-app: outlinewiki
-app_name: SiDoc
-subdomain: sidoc
-db_host: postgres-cluster-rw
-
-storage_class: wiki
-pull_secret_name: "{{ organisation }}-pull-secret"
-
-db_name: "{{ app }}-db"
-db_user: "{{ app }}-user"
-
-git_repo_url: https://github.com/epfl-si/wiki.ops
-
 secrets: "{{ lookup('pipe', 'keybase fs read /keybase/team/epfl_wiki/secrets/outline.yml') | from_yaml }}"
+pull_secret_name: svc0070-pull-secret
 
-allowed_units:
-  # DSI
-  - DSI-EMP
-  - DSI-GE
-  - INVENTAIRE-CRI
-  - ISAS-FSD
-  - ISAS-GE
-  - ISAS-GIF
-  - ISCS-BA
-  - ISCS-BI
-  - ISCS-ERP
-  - ISCS-GE
-  - ISCS-IAM
-  - ISGOV-BO
-  - ISGOV-GE
-  - ISGOV-ITSEC
-  - ISGOV-PM
-  - ITOP-GE
-  - ITOP-INFR
-  - ITOP-MWS
-  - ITOP-SDDC
-  - ITOP-SDESK
-  - ITOP-WSRV
-  # Library
-  - SISB-AIR
-  - SISB-CUBA
-  - SISB-SOAR
-  - SISB-SPICE
-  - SISB-USEP
-  - VPA-SISB-GE
-  # Centers
-  - C4DT
-  - IMAGING-GE
-  # Mediacom
-  - MEC
-  # IT Faculty Services
-  - CDH-IT
-  - CDM-IT
-  - ENAC-IT
-  - IC-IT
-  - SB-IT
-  - STI-IT
-  - SV-IT
+# Computed variables
+app_url: "https://{{ app.subdomain }}{{ '-test' if env == 'test' else '' }}.{{ domain }}"
+collaboration_url: "wss://{{ app.subdomain }}{{ '-test' if env == 'test' else '' }}.{{ domain }}/collaboration"
+redis_url: "redis://{{ app.name }}-redis:{{ redis.port }}"
+database_url: "postgres://{{ app.name }}{{ database.user_suffix }}:{{ database_password }}@{{ database.host }}:5432/{{ app.name }}{{ database.name_suffix }}"
+
+# Environment-specific variables
+current_resources: "{{ resources[env] }}"

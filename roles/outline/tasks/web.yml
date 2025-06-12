@@ -1,287 +1,306 @@
-- name: Create internal Kubernetes service for wiki web application
+- name: Create uploads persistent volume claim
   kubernetes.core.k8s:
-      definition:
-          apiVersion: v1
+    definition:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: "{{ app.name }}-uploads"
+        namespace: "{{ openshift_namespace }}"
+      spec:
+        accessModes:
+          - ReadWriteMany
+        resources:
+          requests:
+            storage: "{{ storage.uploads_size }}"
+        storageClassName: "{{ storage.class }}"
+
+- name: Create web service
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: "{{ app.name }}-web"
+        namespace: "{{ openshift_namespace }}"
+        labels:
+          app: "{{ app.name }}"
+          component: web
+      spec:
+        selector:
+          app: "{{ app.name }}"
+          component: web
+        ports:
+          - name: web-port
+            protocol: TCP
+            port: 80
+            targetPort: 3000
+
+- name: Create web route
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: route.openshift.io/v1
+      kind: Route
+      metadata:
+        name: "{{ app.name }}-web"
+        namespace: "{{ openshift_namespace }}"
+        labels:
+          app: "{{ app.name }}"
+          component: web
+          route: private
+      spec:
+        host: "{{ app.subdomain }}{{ '-test' if env == 'test' else '' }}.{{ domain }}"
+        to:
           kind: Service
-          metadata:
-              name: "{{ app }}-web"
-              namespace: "{{ openshift_namespace }}"
-          spec:
-              selector:
-                  app: "{{ app }}"
-                  component: web
-              ports:
-                  - name: "{{ app }}-web-port"
-                    protocol: TCP
-                    port: 80
-                    targetPort: 3000
+          name: "{{ app.name }}-web"
+        port:
+          targetPort: web-port
+        tls:
+          termination: edge
+          insecureEdgeTerminationPolicy: Redirect
 
-- name: Create OpenShift Route for external wiki web access
+- name: Deploy web application
   kubernetes.core.k8s:
-      definition:
-          apiVersion: route.openshift.io/v1
-          kind: Route
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: "{{ app.name }}-web"
+        namespace: "{{ openshift_namespace }}"
+        labels:
+          app: "{{ app.name }}"
+          component: web
+      spec:
+        replicas: "{{ current_resources.web.replicas }}"
+        strategy:
+          type: RollingUpdate
+          rollingUpdate:
+            maxUnavailable: 1
+            maxSurge: 1
+        selector:
+          matchLabels:
+            app: "{{ app.name }}"
+            component: web
+        template:
           metadata:
-              name: "{{ app }}-web"
-              namespace: "{{ openshift_namespace }}"
-              labels:
-                  app: "{{ app }}"
-                  component: web
-                  route: private
+            labels:
+              app: "{{ app.name }}"
+              component: web
           spec:
-              host: "{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}"
-              to:
-                  kind: Service
-                  name: "{{ app }}-web"
-              port:
-                  targetPort: "{{ app }}-web-port"
-              tls:
-                  termination: edge
-                  insecureEdgeTerminationPolicy: Redirect
+            volumes:
+              - name: yarn-cache
+                emptyDir: {}
+              - name: uploads
+                persistentVolumeClaim:
+                  claimName: "{{ app.name }}-uploads"
+            containers:
+              - name: web
+                image: "{{ registry.url }}/{{ registry.organization }}/{{ app.name }}:{{ app.version }}"
+                imagePullPolicy: Always
+                ports:
+                  - containerPort: 3000
+                env:
+                  - name: YARN_CACHE_FOLDER
+                    value: /tmp/.yarn-cache
+                  - name: URL
+                    value: "{{ app_url }}"
+                  - name: COLLABORATION_URL
+                    value: "{{ collaboration_url }}"
+                  - name: WEB_CONCURRENCY
+                    value: "1"
+                  - name: SERVICES
+                    value: web,websockets,worker
+                envFrom:
+                  - secretRef:
+                      name: "{{ app.name }}-secrets"
+                resources:
+                  requests:
+                    cpu: "{{ current_resources.web.requests.cpu }}"
+                    memory: "{{ current_resources.web.requests.memory }}"
+                  limits:
+                    memory: "{{ current_resources.web.limits.memory }}"
+                readinessProbe:
+                  tcpSocket:
+                    port: 3000
+                  initialDelaySeconds: 20
+                  timeoutSeconds: 5
+                  periodSeconds: 10
+                livenessProbe:
+                  tcpSocket:
+                    port: 3000
+                  initialDelaySeconds: 20
+                  timeoutSeconds: 5
+                  periodSeconds: 30
+                volumeMounts:
+                  - name: yarn-cache
+                    mountPath: /tmp/.yarn-cache
+                  - name: uploads
+                    mountPath: /var/lib/outline/data
+            imagePullSecrets:
+              - name: "{{ pull_secret_name }}"
 
-- name: Deploy wiki web application with all services except collaboration
+- name: Create horizontal pod autoscaler
   kubernetes.core.k8s:
-      definition:
+    definition:
+      apiVersion: autoscaling/v2
+      kind: HorizontalPodAutoscaler
+      metadata:
+        name: "{{ app.name }}-web-hpa"
+        namespace: "{{ openshift_namespace }}"
+      spec:
+        scaleTargetRef:
           apiVersion: apps/v1
           kind: Deployment
-          metadata:
-              name: "{{ app }}-web"
-              namespace: "{{ openshift_namespace }}"
-              labels:
-                  app: "{{ app }}"
-                  component: web
-          spec:
-              replicas: >-
-                  {{ 1 if env == 'test' else 2 }}
-              strategy:
-                  type: RollingUpdate
-                  rollingUpdate:
-                      maxUnavailable: 1
-                      maxSurge: 1
-              selector:
-                  matchLabels:
-                      app: "{{ app }}"
-                      component: web
-              template:
-                  metadata:
-                      labels:
-                          app: "{{ app }}"
-                          component: web
-                  spec:
-                      volumes:
-                          - name: yarn-cache
-                            emptyDir: {}
-                          - name: "{{ app }}-uploads"
-                            persistentVolumeClaim:
-                                claimName: "{{ app }}-uploads"
-                      containers:
-                          - image: "{{ registry }}/{{ organisation }}/{{ image }}:{{ version }}"
-                            imagePullPolicy: Always
-                            name: "{{ app }}-web"
-                            ports:
-                                - containerPort: 3000
-                            env:
-                                - name: YARN_CACHE_FOLDER
-                                  value: /tmp/.yarn-cache
-                                - name: URL
-                                  value: "https://{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}"
-                                - name: COLLABORATION_URL
-                                  value: "wss://{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}/collaboration"
-                                - name: WEB_CONCURRENCY
-                                  value: "1"
-                                - name: SERVICES
-                                  value: "web,websockets,worker"
-                            envFrom:
-                                - secretRef:
-                                      name: "{{ app }}-secrets"
-                            resources:
-                                requests:
-                                    cpu: 128m
-                                    memory: 1024Mi
-                                limits:
-                                    cpu: 245m
-                                    memory: 2048Mi
-                            readinessProbe:
-                                tcpSocket:
-                                    port: 3000
-                                initialDelaySeconds: 20
-                                timeoutSeconds: 5
-                                periodSeconds: 10
-                            livenessProbe:
-                                tcpSocket:
-                                    port: 3000
-                                initialDelaySeconds: 20
-                                timeoutSeconds: 5
-                                periodSeconds: 30
-                            volumeMounts:
-                                - name: yarn-cache
-                                  mountPath: /tmp/.yarn-cache
-                                - name: "{{ app }}-uploads"
-                                  mountPath: /var/lib/outline/data
-                      imagePullSecrets:
-                          - name: "{{ pull_secret_name }}"
+          name: "{{ app.name }}-web"
+        minReplicas: "{{ autoscaling.min_replicas }}"
+        maxReplicas: "{{ autoscaling.max_replicas }}"
+        metrics:
+          - type: Resource
+            resource:
+              name: memory
+              target:
+                type: Utilization
+                averageUtilization: "{{ autoscaling.memory_threshold }}"
+        behavior:
+          scaleUp:
+            stabilizationWindowSeconds: "{{ autoscaling.scale_up_window }}"
+            policies:
+              - type: Percent
+                value: 100
+                periodSeconds: 15
+              - type: Pods
+                value: 2
+                periodSeconds: 60
+            selectPolicy: Max
+          scaleDown:
+            stabilizationWindowSeconds: "{{ autoscaling.scale_down_window }}"
+            policies:
+              - type: Percent
+                value: 10
+                periodSeconds: 60
+            selectPolicy: Min
 
-- name: Create HorizontalPodAutoscaler for web pods
+- name: Create collaboration service
   kubernetes.core.k8s:
-      definition:
-          apiVersion: autoscaling/v2
-          kind: HorizontalPodAutoscaler
-          metadata:
-              name: "{{ app }}-web-hpa"
-              namespace: "{{ openshift_namespace }}"
-          spec:
-              scaleTargetRef:
-                  apiVersion: apps/v1
-                  kind: Deployment
-                  name: "{{ app }}-web"
-              minReplicas: 2
-              maxReplicas: 4
-              metrics:
-                  - type: Resource
-                    resource:
-                        name: memory
-                        target:
-                            type: Utilization
-                            averageUtilization: 95
-              behavior:
-                  scaleUp:
-                      stabilizationWindowSeconds: 60
-                      policies:
-                          - type: Percent
-                            value: 100
-                            periodSeconds: 15
-                          - type: Pods
-                            value: 2
-                            periodSeconds: 60
-                      selectPolicy: Max
-                  scaleDown:
-                      stabilizationWindowSeconds: 300
-                      policies:
-                          - type: Percent
-                            value: 10
-                            periodSeconds: 60
-                      selectPolicy: Min
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: "{{ app.name }}-collaboration"
+        namespace: "{{ openshift_namespace }}"
+        labels:
+          app: "{{ app.name }}"
+          component: collaboration
+      spec:
+        selector:
+          app: "{{ app.name }}"
+          component: collaboration
+        ports:
+          - name: collaboration-port
+            protocol: TCP
+            port: 80
+            targetPort: 3000
 
-- name: Create internal Kubernetes service for wiki collaboration
+- name: Create collaboration route
   kubernetes.core.k8s:
-      definition:
-          apiVersion: v1
+    definition:
+      apiVersion: route.openshift.io/v1
+      kind: Route
+      metadata:
+        name: "{{ app.name }}-collaboration"
+        namespace: "{{ openshift_namespace }}"
+        labels:
+          app: "{{ app.name }}"
+          component: collaboration
+          route: private
+        annotations:
+          route.openshift.io/timeout: 3600s
+      spec:
+        host: "{{ app.subdomain }}{{ '-test' if env == 'test' else '' }}.{{ domain }}"
+        path: /collaboration
+        to:
           kind: Service
-          metadata:
-              name: "{{ app }}-collaboration"
-              namespace: "{{ openshift_namespace }}"
-          spec:
-              selector:
-                  app: "{{ app }}"
-                  component: collaboration
-              ports:
-                  - name: "{{ app }}-collab-port"
-                    protocol: TCP
-                    port: 80
-                    targetPort: 3000
+          name: "{{ app.name }}-collaboration"
+        port:
+          targetPort: collaboration-port
+        tls:
+          termination: edge
+          insecureEdgeTerminationPolicy: Redirect
 
-- name: Create OpenShift Route for collaboration WebSocket
+- name: Deploy collaboration service
   kubernetes.core.k8s:
-      definition:
-          apiVersion: route.openshift.io/v1
-          kind: Route
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: "{{ app.name }}-collaboration"
+        namespace: "{{ openshift_namespace }}"
+        labels:
+          app: "{{ app.name }}"
+          component: collaboration
+      spec:
+        replicas: 1
+        strategy:
+          type: RollingUpdate
+          rollingUpdate:
+            maxUnavailable: 1
+            maxSurge: 1
+        selector:
+          matchLabels:
+            app: "{{ app.name }}"
+            component: collaboration
+        template:
           metadata:
-              name: "{{ app }}-collaboration"
-              namespace: "{{ openshift_namespace }}"
-              labels:
-                  app: "{{ app }}"
-                  component: collaboration
-                  route: private
-              annotations:
-                  route.openshift.io/timeout: 3600s
+            labels:
+              app: "{{ app.name }}"
+              component: collaboration
           spec:
-              host: "{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}"
-              path: /collaboration
-              to:
-                  kind: Service
-                  name: "{{ app }}-collaboration"
-              port:
-                  targetPort: "{{ app }}-collab-port"
-              tls:
-                  termination: edge
-                  insecureEdgeTerminationPolicy: Redirect
-
-- name: Deploy wiki collaboration service (single instance only)
-  kubernetes.core.k8s:
-      definition:
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-              name: "{{ app }}-collaboration"
-              namespace: "{{ openshift_namespace }}"
-              labels:
-                  app: "{{ app }}"
-                  component: collaboration
-          spec:
-              replicas: 1
-              strategy:
-                  type: RollingUpdate
-                  rollingUpdate:
-                      maxUnavailable: 1
-                      maxSurge: 1
-              selector:
-                  matchLabels:
-                      app: "{{ app }}"
-                      component: collaboration
-              template:
-                  metadata:
-                      labels:
-                          app: "{{ app }}"
-                          component: collaboration
-                  spec:
-                      volumes:
-                          - name: yarn-cache
-                            emptyDir: {}
-                          - name: "{{ app }}-uploads"
-                            persistentVolumeClaim:
-                                claimName: "{{ app }}-uploads"
-                      containers:
-                          - image: "{{ registry }}/{{ organisation }}/{{ image }}:{{ version }}"
-                            imagePullPolicy: Always
-                            name: "{{ app }}-collaboration"
-                            ports:
-                                - containerPort: 3000
-                            env:
-                                - name: YARN_CACHE_FOLDER
-                                  value: /tmp/.yarn-cache
-                                - name: URL
-                                  value: "https://{{ subdomain }}{% if env == 'test' %}-test{% endif %}.{{ domain }}"
-                                - name: WEB_CONCURRENCY
-                                  value: "1"
-                            envFrom:
-                                - secretRef:
-                                      name: "{{ app }}-secrets"
-                            command: ["/bin/sh", "-c"]
-                            args:
-                                - yarn start --services=collaboration
-                            resources:
-                                requests:
-                                    cpu: 128m
-                                    memory: 256Mi
-                                limits:
-                                    cpu: 256m
-                                    memory: 512Mi
-                            readinessProbe:
-                                tcpSocket:
-                                    port: 3000
-                                initialDelaySeconds: 20
-                                timeoutSeconds: 5
-                                periodSeconds: 10
-                            livenessProbe:
-                                tcpSocket:
-                                    port: 3000
-                                initialDelaySeconds: 20
-                                timeoutSeconds: 5
-                                periodSeconds: 30
-                            volumeMounts:
-                                - name: yarn-cache
-                                  mountPath: /tmp/.yarn-cache
-                                - name: "{{ app }}-uploads"
-                                  mountPath: /var/lib/outline/data
-                      imagePullSecrets:
-                          - name: "{{ pull_secret_name }}"
+            volumes:
+              - name: yarn-cache
+                emptyDir: {}
+              - name: uploads
+                persistentVolumeClaim:
+                  claimName: "{{ app.name }}-uploads"
+            containers:
+              - name: collaboration
+                image: "{{ registry.url }}/{{ registry.organization }}/{{ app.name }}:{{ app.version }}"
+                imagePullPolicy: Always
+                ports:
+                  - containerPort: 3000
+                env:
+                  - name: YARN_CACHE_FOLDER
+                    value: /tmp/.yarn-cache
+                  - name: URL
+                    value: "{{ app_url }}"
+                  - name: WEB_CONCURRENCY
+                    value: "1"
+                envFrom:
+                  - secretRef:
+                      name: "{{ app.name }}-secrets"
+                command: ["/bin/sh", "-c"]
+                args:
+                  - yarn start --services=collaboration
+                resources:
+                  requests:
+                    cpu: "{{ current_resources.collaboration.requests.cpu }}"
+                    memory: "{{ current_resources.collaboration.requests.memory }}"
+                  limits:
+                    memory: "{{ current_resources.collaboration.limits.memory }}"
+                readinessProbe:
+                  tcpSocket:
+                    port: 3000
+                  initialDelaySeconds: 20
+                  timeoutSeconds: 5
+                  periodSeconds: 10
+                livenessProbe:
+                  tcpSocket:
+                    port: 3000
+                  initialDelaySeconds: 20
+                  timeoutSeconds: 5
+                  periodSeconds: 30
+                volumeMounts:
+                  - name: yarn-cache
+                    mountPath: /tmp/.yarn-cache
+                  - name: uploads
+                    mountPath: /var/lib/outline/data
+            imagePullSecrets:
+              - name: "{{ pull_secret_name }}"

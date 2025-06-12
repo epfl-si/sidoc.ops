@@ -1,4 +1,4 @@
-- name: Create redis service
+- name: Create Redis service
   kubernetes.core.k8s:
     definition:
       apiVersion: v1
@@ -7,33 +7,36 @@
         app: "{{ app }}"
         component: redis
       metadata:
-        name: "{{ app }}-redis"
+        name: "{{ app.name }}-redis"
         namespace: "{{ openshift_namespace }}"
+        labels:
+          app: "{{ app.name }}"
+          component: redis
       spec:
         selector:
-          app: "{{ app }}"
+          app: "{{ app.name }}"
           component: redis
         ports:
-          - name: "{{ app }}-redis-svc-port"
+          - name: redis-port
             protocol: TCP
-            port: 6379
-            targetPort: 6379
+            port: "{{ redis.port }}"
+            targetPort: "{{ redis.port }}"
 
-- name: Create redis PVC
+- name: Create Redis persistent volume claim
   kubernetes.core.k8s:
     definition:
       apiVersion: v1
       kind: PersistentVolumeClaim
       metadata:
-        name: "{{ app }}-redis-data"
+        name: "{{ app.name }}-redis-data"
         namespace: "{{ openshift_namespace }}"
       spec:
         accessModes:
           - ReadWriteOnce
         resources:
           requests:
-            storage: 1Gi
-        storageClassName: "{{ storage_class }}"
+            storage: "{{ storage.redis_size }}"
+        storageClassName: "{{ storage.class }}"
 
 - name: Create Redis deployment
   kubernetes.core.k8s:
@@ -41,35 +44,34 @@
       apiVersion: apps/v1
       kind: Deployment
       metadata:
-        name: "{{ app }}-redis"
+        name: "{{ app.name }}-redis"
         namespace: "{{ openshift_namespace }}"
         labels:
-          app: "{{ app }}"
+          app: "{{ app.name }}"
           component: redis
       spec:
         replicas: 1
         selector:
           matchLabels:
-            app: "{{ app }}"
+            app: "{{ app.name }}"
             component: redis
         template:
           metadata:
             labels:
-              app: "{{ app }}"
+              app: "{{ app.name }}"
               component: redis
           spec:
             containers:
               - name: redis
-                image: quay-its.epfl.ch/svc0176/redis:8.0-M04
+                image: "{{ redis.image }}"
                 ports:
-                  - containerPort: 6379
+                  - containerPort: "{{ redis.port }}"
                 resources:
                   requests:
-                    cpu: "32m"
-                    memory: "50Mi"
+                    cpu: "{{ current_resources.redis.requests.cpu }}"
+                    memory: "{{ current_resources.redis.requests.memory }}"
                   limits:
-                    cpu: "64m"
-                    memory: "100Mi"
+                    memory: "{{ current_resources.redis.limits.memory }}"
                 volumeMounts:
                   - name: redis-data
                     mountPath: /data
@@ -78,4 +80,4 @@
             volumes:
               - name: redis-data
                 persistentVolumeClaim:
-                  claimName: "{{ app }}-redis-data"
+                  claimName: "{{ app.name }}-redis-data"

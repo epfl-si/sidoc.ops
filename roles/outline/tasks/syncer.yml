@@ -1,79 +1,85 @@
-- name: Create config map for allowed units
+- name: Create allowed units config map
   kubernetes.core.k8s:
     state: present
     definition:
       apiVersion: v1
       kind: ConfigMap
       metadata:
-        name: "{{ app }}-allowed-units"
+        name: "{{ app.name }}-allowed-units"
         namespace: "{{ openshift_namespace }}"
       data:
-        "allowed-units.json": "{{ allowed_units | to_json }}"
+        allowed-units.json: "{{ allowed_units | to_json }}"
 
-- name: Ensure Sync Secret Exists
+- name: Create sync configuration secret
   kubernetes.core.k8s:
     state: present
     definition:
       apiVersion: v1
       kind: Secret
       metadata:
-        name: "{{ app }}-sync"
+        name: "{{ app.name }}-sync"
         namespace: "{{ openshift_namespace }}"
       type: Opaque
       stringData:
-        OUTLINE_BASE_URL: "{{ ('https://' ~ subdomain ~ (env == 'test') | ternary('-test', '') ~ '.' ~ domain) }}"
-        OUTLINE_ADMIN_GROUP: sidoc-admins
-        EPFL_ALLOWED_UNITS_FILE: "/opt/allowed-units.json"
+        OUTLINE_BASE_URL: "{{ app_url }}"
+        OUTLINE_ADMIN_GROUP: "{{ sync.admin_group }}"
+        EPFL_ALLOWED_UNITS_FILE: /opt/allowed-units.json
         EPFL_API_URL: "{{ secrets[env].sync.epfl_api_url }}"
         EPFL_API_PASSWORD: "{{ secrets[env].sync.epfl_api_password }}"
         EPFL_API_USERNAME: "{{ secrets[env].sync.epfl_api_username }}"
 
-- name: Create Sync CronJob
+- name: Create sync cron job
   kubernetes.core.k8s:
     definition:
       apiVersion: batch/v1
       kind: CronJob
       metadata:
-        name: "{{ app }}-sync-cron"
+        name: "{{ app.name }}-sync-cron"
         namespace: "{{ openshift_namespace }}"
+        labels:
+          app: "{{ app.name }}"
+          component: sync
       spec:
-        schedule: "30 * * * *"
+        schedule: "{{ sync.schedule }}"
         concurrencyPolicy: Forbid
         successfulJobsHistoryLimit: 3
         failedJobsHistoryLimit: 1
         jobTemplate:
           spec:
             template:
+              metadata:
+                labels:
+                  app: "{{ app.name }}"
+                  component: sync
               spec:
                 containers:
-                  - name: "{{ app }}-sync"
-                    image: "{{ registry }}/{{ organisation }}/{{ app }}-sync:1.7.1"
+                  - name: sync
+                    image: "{{ registry.url }}/{{ registry.organization }}/{{ app.name }}-sync:{{ sync.image_version }}"
                     imagePullPolicy: Always
                     envFrom:
                       - secretRef:
-                          name: "{{ app }}-sync"
+                          name: "{{ app.name }}-sync"
                     env:
                       - name: OUTLINE_API_TOKEN
                         valueFrom:
                           secretKeyRef:
-                            name: "{{ app }}-api-key-admin"
-                            key: "API_KEY"
+                            name: "{{ app.name }}-api-key-admin"
+                            key: API_KEY
                     resources:
                       requests:
-                        cpu: 50m
-                        memory: 256Mi
+                        cpu: "{{ current_resources.sync.requests.cpu }}"
+                        memory: "{{ current_resources.sync.requests.memory }}"
                       limits:
-                        cpu: 100m
-                        memory: 512Mi
+                        memory: "{{ current_resources.sync.limits.memory }}"
                     volumeMounts:
                       - name: allowed-units-volume
-                        mountPath: "/opt/allowed-units.json"
-                        subPath: "allowed-units.json"
+                        mountPath: /opt/allowed-units.json
+                        subPath: allowed-units.json
                         readOnly: true
                 restartPolicy: OnFailure
                 volumes:
                   - name: allowed-units-volume
                     configMap:
-                      name: "{{ app }}-allowed-units"
+                      name: "{{ app.name }}-allowed-units"
                 imagePullSecrets:
                   - name: "{{ pull_secret_name }}"
