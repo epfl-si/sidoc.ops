@@ -12,6 +12,7 @@ env:
     REPOSITORY: 'quay-its.epfl.ch/svc0070'
 jobs:
     get-version:
+        name: Get Version
         runs-on: ubuntu-24.04
         outputs:
             version: ${{ steps.get_unique_version.outputs.unique_version }}
@@ -67,6 +68,7 @@ jobs:
                   echo "unique_version=$UNIQUE_VERSION" >> $GITHUB_OUTPUT
 
     build:
+        name: Build and Push Docker Image
         needs: get-version
         runs-on: ubuntu-24.04
         permissions:
