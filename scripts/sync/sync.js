@@ -159,7 +159,7 @@ class OutlineSync {
 			}
 			return null;
 		} catch (error) {
-			logger.error('Error making Outline API call', {
+			logger.error(`Outline API ${method} ${endpoint} failed`, {
 				method,
 				endpoint,
 				data,
@@ -180,13 +180,12 @@ class OutlineSync {
 			const sciper = personResponse?.data.id;
 
 			if (!sciper) {
-				logger.warn(`No SCIPER found for email: ${email}`);
-				return [];
+				throw new Error(`No SCIPER found for user ${email} - cannot retrieve units`);
 			}
 
 			const unitsResponse = await this.epflClient.get(`/units?persid=${sciper}`);
 
-			logger.info('Units retrieved successfully', {
+			logger.debug('Units retrieved for user', {
 				email,
 				sciper,
 				totalUnits: unitsResponse.data.count,
@@ -194,11 +193,11 @@ class OutlineSync {
 
 			return unitsResponse.data.units || [];
 		} catch (error) {
-			logger.error('Error retrieving user units', {
+			logger.error(`Failed to retrieve units for user ${email}`, {
 				email,
 				error: error.message,
 			});
-			return [];
+			throw error;
 		}
 	}
 
@@ -207,11 +206,16 @@ class OutlineSync {
 	 * @returns {Array} - List of active users
 	 */
 	async getAllUsers() {
-		const response = await this._makeOutlineApiCall('POST', '/api/users.list', {});
-		const activeUsers = response.data.filter((user) => user.email !== this.ADMIN_EMAIL);
+		try {
+			const response = await this._makeOutlineApiCall('POST', '/api/users.list', {});
+			const activeUsers = response.data.filter((user) => user.email !== this.ADMIN_EMAIL);
 
-		logger.info('Retrieved active users', { count: activeUsers.length });
-		return activeUsers;
+			logger.debug('Retrieved active users', { count: activeUsers.length });
+			return activeUsers;
+		} catch (error) {
+			logger.error('Failed to retrieve users from Outline API', { error: error.message });
+			throw error;
+		}
 	}
 
 	/**
@@ -219,11 +223,16 @@ class OutlineSync {
 	 * @returns {Array} - List of groups
 	 */
 	async getAllGroups() {
-		const response = await this._makeOutlineApiCall('POST', '/api/groups.list', {});
-		const groups = response.data.map((data) => data.groups || data).flat();
+		try {
+			const response = await this._makeOutlineApiCall('POST', '/api/groups.list', {});
+			const groups = response.data.map((data) => data.groups || data).flat();
 
-		logger.info('Retrieved groups', { count: groups.length });
-		return groups;
+			logger.debug('Retrieved groups', { count: groups.length });
+			return groups;
+		} catch (error) {
+			logger.error('Failed to retrieve groups from Outline API', { error: error.message });
+			throw error;
+		}
 	}
 
 	/**
@@ -240,15 +249,15 @@ class OutlineSync {
 
 			const uniqueAdmins = Array.from(new Map(admins.map((admin) => [admin.id, admin])).values());
 
-			logger.info('Retrieved admin users', {
+			logger.debug('Retrieved admin users', {
 				count: uniqueAdmins.length,
 				adminGroup: adminGroupName,
 			});
 
 			return uniqueAdmins;
 		} catch (error) {
-			logger.error('Error retrieving admin users', { error: error.message });
-			return [];
+			logger.error('Failed to retrieve admin users from EPFL API', { error: error.message });
+			throw error;
 		}
 	}
 
@@ -266,8 +275,7 @@ class OutlineSync {
 			}
 
 			if (!fs.existsSync(allowedUnitsFile)) {
-				logger.warn('Allowed units file does not exist', { file: allowedUnitsFile });
-				return [];
+				throw new Error(`Allowed units file does not exist: ${allowedUnitsFile}`);
 			}
 
 			const fileContent = fs.readFileSync(allowedUnitsFile, 'utf8');
@@ -277,11 +285,11 @@ class OutlineSync {
 				throw new Error('Invalid format: Expected an array of units in the file');
 			}
 
-			logger.info('Retrieved allowed units', { count: allowedUnits.length });
+			logger.debug('Retrieved allowed units', { count: allowedUnits.length });
 			return allowedUnits;
 		} catch (err) {
-			logger.error('Error reading allowed units file', { error: err.message });
-			return [];
+			logger.error('Failed to read allowed units file', { error: err.message });
+			throw err;
 		}
 	}
 
@@ -304,11 +312,16 @@ class OutlineSync {
 	 * @returns {Array} - List of collections
 	 */
 	async getAllCollections() {
-		const response = await this._makeOutlineApiCall('POST', '/api/collections.list', {});
-		const collections = response.data;
+		try {
+			const response = await this._makeOutlineApiCall('POST', '/api/collections.list', {});
+			const collections = response.data;
 
-		logger.info('Retrieved collections', { count: collections.length });
-		return collections;
+			logger.debug('Retrieved collections', { count: collections.length });
+			return collections;
+		} catch (error) {
+			logger.error('Failed to retrieve collections from Outline API', { error: error.message });
+			throw error;
+		}
 	}
 
 	/**
@@ -317,8 +330,13 @@ class OutlineSync {
 	 * @returns {Object|null} - User object or null if not found
 	 */
 	async findUserByEmail(email) {
-		const users = await this.getAllUsers();
-		return users.find((u) => u.email === email) || null;
+		try {
+			const users = await this.getAllUsers();
+			return users.find((u) => u.email === email) || null;
+		} catch (error) {
+			logger.error(`Failed to find user by email ${email}`, { error: error.message });
+			throw error;
+		}
 	}
 
 	/**
@@ -327,12 +345,17 @@ class OutlineSync {
 	 * @returns {Object|null} - Group object or null if not found
 	 */
 	async findGroupByName(name) {
-		const groups = await this.getAllGroups();
+		try {
+			const groups = await this.getAllGroups();
 
-		let group = groups.find((g) => g.name === name);
-		if (group) return group;
+			let group = groups.find((g) => g.name === name);
+			if (group) return group;
 
-		return groups.find((g) => g.name.toLowerCase() === name.toLowerCase()) || null;
+			return groups.find((g) => g.name.toLowerCase() === name.toLowerCase()) || null;
+		} catch (error) {
+			logger.error(`Failed to find group by name ${name}`, { error: error.message });
+			throw error;
+		}
 	}
 
 	/**
@@ -341,12 +364,17 @@ class OutlineSync {
 	 * @returns {Object|null} - Collection object or null if not found
 	 */
 	async findCollectionByName(name) {
-		const collections = await this.getAllCollections();
+		try {
+			const collections = await this.getAllCollections();
 
-		let collection = collections.find((c) => c.name === name);
-		if (collection) return collection;
+			let collection = collections.find((c) => c.name === name);
+			if (collection) return collection;
 
-		return collections.find((c) => c.name.toLowerCase() === name.toLowerCase()) || null;
+			return collections.find((c) => c.name.toLowerCase() === name.toLowerCase()) || null;
+		} catch (error) {
+			logger.error(`Failed to find collection by name ${name}`, { error: error.message });
+			throw error;
+		}
 	}
 
 	/**
@@ -355,13 +383,17 @@ class OutlineSync {
 	 * @returns {Object} - Created group
 	 */
 	async createGroup(name) {
-		logger.info('Creating group', { groupName: name });
-		const response = await this.outlineClient.post('/api/groups.create', { name });
-		logger.info('Group created successfully', {
-			groupId: response.data.data.id,
-			groupName: name,
-		});
-		return response.data.data;
+		try {
+			const response = await this.outlineClient.post('/api/groups.create', { name });
+			logger.info('Group created', {
+				groupId: response.data.data.id,
+				groupName: name,
+			});
+			return response.data.data;
+		} catch (error) {
+			logger.error(`Failed to create group ${name}`, { error: error.message });
+			throw error;
+		}
 	}
 
 	/**
@@ -371,16 +403,20 @@ class OutlineSync {
 	 * @returns {Object} - Updated group
 	 */
 	async updateGroupName(groupId, newName) {
-		logger.info('Updating group name', { groupId, newName });
-		const response = await this.outlineClient.post('/api/groups.update', {
-			id: groupId,
-			name: newName,
-		});
-		logger.info('Group name updated successfully', {
-			groupId,
-			newName,
-		});
-		return response.data.data;
+		try {
+			const response = await this.outlineClient.post('/api/groups.update', {
+				id: groupId,
+				name: newName,
+			});
+			logger.info('Group name updated', {
+				groupId,
+				newName,
+			});
+			return response.data.data;
+		} catch (error) {
+			logger.error(`Failed to update group ${groupId} name to ${newName}`, { error: error.message });
+			throw error;
+		}
 	}
 
 	/**
@@ -390,15 +426,20 @@ class OutlineSync {
 	 * @returns {Object} - Created collection
 	 */
 	async createCollection(name, isPrivate = false) {
-		const response = await this.outlineClient.post('/api/collections.create', {
-			name,
-			permission: 'read',
-			private: isPrivate,
-		});
+		try {
+			const response = await this.outlineClient.post('/api/collections.create', {
+				name,
+				permission: 'read',
+				private: isPrivate,
+			});
 
-		const collectionId = response.data.data.id;
-		logger.info('Collection created', { collectionId, collectionName: name });
-		return response.data.data;
+			const collectionId = response.data.data.id;
+			logger.info('Collection created', { collectionId, collectionName: name });
+			return response.data.data;
+		} catch (error) {
+			logger.error(`Failed to create collection ${name}`, { error: error.message });
+			throw error;
+		}
 	}
 
 	/**
@@ -409,18 +450,22 @@ class OutlineSync {
 	 * @returns {Object} - Updated collection
 	 */
 	async updateCollection(collectionId, newName, isPrivate = true) {
-		logger.info('Updating collection', { collectionId, newName, isPrivate });
-		const response = await this.outlineClient.post('/api/collections.update', {
-			id: collectionId,
-			name: newName,
-			private: isPrivate,
-		});
-		logger.info('Collection updated successfully', {
-			collectionId,
-			newName,
-			isPrivate,
-		});
-		return response.data.data;
+		try {
+			const response = await this.outlineClient.post('/api/collections.update', {
+				id: collectionId,
+				name: newName,
+				private: isPrivate,
+			});
+			logger.info('Collection updated', {
+				collectionId,
+				newName,
+				isPrivate,
+			});
+			return response.data.data;
+		} catch (error) {
+			logger.error(`Failed to update collection ${collectionId}`, { error: error.message });
+			throw error;
+		}
 	}
 
 	/**
@@ -432,14 +477,15 @@ class OutlineSync {
 	async addUserToGroup(userId, groupId) {
 		try {
 			await this.outlineClient.post('/api/groups.add_user', { id: groupId, userId });
-			logger.info('User added to group', { groupId, userId });
+			logger.debug('User added to group', { groupId, userId });
 			return true;
 		} catch (error) {
 			if (error.response && error.response.status === 400 && error.response.data.message && error.response.data.message.includes('already a member')) {
-				logger.info('User is already a member of group', { groupId, userId });
+				logger.debug('User already in group', { groupId, userId });
 				return true;
 			}
 
+			logger.error(`Failed to add user ${userId} to group ${groupId}`, { error: error.message });
 			throw error;
 		}
 	}
@@ -451,19 +497,22 @@ class OutlineSync {
 	 * @returns {Boolean} - Success status
 	 */
 	async makeUserAdmin(userId, email) {
-		logger.info('Checking user role before making user an admin', { userId, email });
-		const response = await this.outlineClient.post('/api/users.info', { id: userId });
-		const currentRole = response.data.data.role;
+		try {
+			const response = await this.outlineClient.post('/api/users.info', { id: userId });
+			const currentRole = response.data.data.role;
 
-		if (currentRole === 'admin') {
-			logger.info('User is already an admin', { userId, email });
+			if (currentRole === 'admin') {
+				logger.debug('User already has admin role', { userId, email });
+				return true;
+			}
+
+			await this.outlineClient.post('/api/users.update_role', { id: userId, role: 'admin' });
+			logger.info('User promoted to admin', { userId, email });
 			return true;
+		} catch (error) {
+			logger.error(`Failed to make user ${email} admin`, { userId, error: error.message });
+			throw error;
 		}
-
-		logger.info('Making user an admin', { userId, email });
-		await this.outlineClient.post('/api/users.update_role', { id: userId, role: 'admin' });
-		logger.info('User made admin successfully', { userId, email });
-		return true;
 	}
 
 	/**
@@ -473,19 +522,22 @@ class OutlineSync {
 	 * @returns {Boolean} - Success status
 	 */
 	async removeUserAdmin(userId, email) {
-		logger.info('Checking user role before removing admin role', { userId, email });
-		const response = await this.outlineClient.post('/api/users.info', { id: userId });
-		const currentRole = response.data.data.role;
+		try {
+			const response = await this.outlineClient.post('/api/users.info', { id: userId });
+			const currentRole = response.data.data.role;
 
-		if (currentRole !== 'admin') {
-			logger.info('User is not an admin, no action needed', { userId, email });
+			if (currentRole !== 'admin') {
+				logger.debug('User is not an admin, no action needed', { userId, email });
+				return true;
+			}
+
+			await this.outlineClient.post('/api/users.update_role', { id: userId, role: 'viewer' });
+			logger.info('Admin role removed from user', { userId, email });
 			return true;
+		} catch (error) {
+			logger.error(`Failed to remove admin role from user ${email}`, { userId, error: error.message });
+			throw error;
 		}
-
-		logger.info('Removing admin role from user', { userId, email });
-		await this.outlineClient.post('/api/users.update_role', { id: userId, role: 'viewer' });
-		logger.info('Admin role removed from user', { userId, email });
-		return true;
 	}
 
 	/**
@@ -496,14 +548,18 @@ class OutlineSync {
 	 * @returns {Boolean} - Success status
 	 */
 	async addGroupToCollection(groupId, collectionId, permission = 'read_write') {
-		logger.info('Adding group to collection', { groupId, collectionId, permission });
-		await this.outlineClient.post('/api/collections.add_group', {
-			id: collectionId,
-			groupId,
-			permission,
-		});
-		logger.info('Group added to collection successfully', { groupId, collectionId });
-		return true;
+		try {
+			await this.outlineClient.post('/api/collections.add_group', {
+				id: collectionId,
+				groupId,
+				permission,
+			});
+			logger.info('Group added to collection', { groupId, collectionId, permission });
+			return true;
+		} catch (error) {
+			logger.error(`Failed to add group ${groupId} to collection ${collectionId}`, { error: error.message });
+			throw error;
+		}
 	}
 
 	/**
@@ -512,13 +568,17 @@ class OutlineSync {
 	 * @returns {Boolean} - Success status
 	 */
 	async makeCollectionPrivate(collectionId) {
-		logger.info('Making collection private', { collectionId });
-		await this.outlineClient.post('/api/collections.update', {
-			id: collectionId,
-			permission: null,
-		});
-		logger.info('Collection made private successfully', { collectionId });
-		return true;
+		try {
+			await this.outlineClient.post('/api/collections.update', {
+				id: collectionId,
+				permission: null,
+			});
+			logger.info('Collection made private', { collectionId });
+			return true;
+		} catch (error) {
+			logger.error(`Failed to make collection ${collectionId} private`, { error: error.message });
+			throw error;
+		}
 	}
 
 	/**
@@ -528,9 +588,14 @@ class OutlineSync {
 	 * @returns {Boolean} - Success status
 	 */
 	async removeUserFromGroup(userId, groupId) {
-		await this.outlineClient.post('/api/groups.remove_user', { id: groupId, userId });
-		logger.info('User removed from group', { groupId, userId });
-		return true;
+		try {
+			await this.outlineClient.post('/api/groups.remove_user', { id: groupId, userId });
+			logger.debug('User removed from group', { groupId, userId });
+			return true;
+		} catch (error) {
+			logger.error(`Failed to remove user ${userId} from group ${groupId}`, { error: error.message });
+			throw error;
+		}
 	}
 
 	/**
@@ -539,8 +604,13 @@ class OutlineSync {
 	 * @returns {Array} - List of users in the group
 	 */
 	async getGroupMembers(groupId) {
-		const response = await this._makeOutlineApiCall('POST', '/api/groups.memberships', { id: groupId });
-		return response.data.users || [];
+		try {
+			const response = await this._makeOutlineApiCall('POST', '/api/groups.memberships', { id: groupId });
+			return response.data.users || [];
+		} catch (error) {
+			logger.error(`Failed to get members of group ${groupId}`, { error: error.message });
+			throw error;
+		}
 	}
 
 	/**
@@ -548,8 +618,13 @@ class OutlineSync {
 	 * @returns {Array} - List of admin users
 	 */
 	async getAllAdminUsers() {
-		const response = await this._makeOutlineApiCall('POST', '/api/users.list', { role: 'admin' });
-		return response.data.filter((user) => user.email !== this.ADMIN_EMAIL);
+		try {
+			const response = await this._makeOutlineApiCall('POST', '/api/users.list', { role: 'admin' });
+			return response.data.filter((user) => user.email !== this.ADMIN_EMAIL);
+		} catch (error) {
+			logger.error('Failed to get admin users from Outline', { error: error.message });
+			throw error;
+		}
 	}
 
 	/**
@@ -558,10 +633,14 @@ class OutlineSync {
 	 * @returns {Boolean} - Success status
 	 */
 	async deleteGroup(groupId) {
-		logger.info('Deleting group', { groupId });
-		await this.outlineClient.post('/api/groups.delete', { id: groupId });
-		logger.info('Group deleted successfully', { groupId });
-		return true;
+		try {
+			await this.outlineClient.post('/api/groups.delete', { id: groupId });
+			logger.info('Group deleted', { groupId });
+			return true;
+		} catch (error) {
+			logger.error(`CRITICAL: Failed to delete group ${groupId}`, { error: error.message });
+			throw error;
+		}
 	}
 
 	/**
@@ -570,10 +649,14 @@ class OutlineSync {
 	 * @returns {Boolean} - Success status
 	 */
 	async deleteCollection(collectionId) {
-		logger.info('Deleting collection', { collectionId });
-		await this.outlineClient.post('/api/collections.delete', { id: collectionId });
-		logger.info('Collection deleted successfully', { collectionId });
-		return true;
+		try {
+			await this.outlineClient.post('/api/collections.delete', { id: collectionId });
+			logger.info('Collection deleted', { collectionId });
+			return true;
+		} catch (error) {
+			logger.error(`CRITICAL: Failed to delete collection ${collectionId}`, { error: error.message });
+			throw error;
+		}
 	}
 
 	/**
@@ -592,145 +675,128 @@ class OutlineSync {
 
 	/**
 	 * Synchronize users with their corresponding units/groups
-	 * @returns {Object} - Sync results including success status
 	 */
 	async syncUsers() {
-		try {
-			const activeUsers = await this.getAllUsers();
-			const existingGroups = await this.getAllGroups();
-			const allowedUnits = await this.getAllowedUnits();
+		const activeUsers = await this.getAllUsers();
+		const existingGroups = await this.getAllGroups();
+		const allowedUnits = await this.getAllowedUnits();
 
-			if (!activeUsers.length) {
-				logger.warn('No active users found, sync cannot proceed');
-				return {
-					success: false,
-					reason: 'No active users found',
-				};
-			}
-
-			logger.info('Starting user synchronization', {
-				activeUsersCount: activeUsers.length,
-				existingGroupsCount: existingGroups.length,
-				allowedUnitsMode: allowedUnits === null ? 'all allowed' : `${allowedUnits.length} units allowed`,
-			});
-
-			const userUnitsMap = {};
-			let totalUnitsFound = 0;
-
-			for (const user of activeUsers) {
-				const units = await this.getUserUnits(user.email);
-
-				const filteredUnits = allowedUnits === null ? units : units.filter((unit) => this.isUnitAllowed(unit, allowedUnits));
-
-				userUnitsMap[user.email] = filteredUnits;
-				totalUnitsFound += filteredUnits.length;
-
-				logger.info('Retrieved units for user', {
-					email: user.email,
-					totalUnits: units.length,
-					allowedUnits: filteredUnits.length,
-				});
-			}
-
-			logger.info('Unit data retrieval completed', {
-				totalUsers: activeUsers.length,
-				totalAllowedUnitsFound: totalUnitsFound,
-			});
-
-			const validGroupNames = new Set();
-			validGroupNames.add(this.ADMIN_GROUP_NAME.toLowerCase());
-
-			for (const user of activeUsers) {
-				const unitsForUser = userUnitsMap[user.email] || [];
-				logger.info('Processing user units', {
-					email: user.email,
-					unitCount: unitsForUser.length,
-				});
-
-				for (const unit of unitsForUser) {
-					let group = await this.findGroupByName(unit.name);
-
-					if (!group) {
-						group = await this.createGroup(unit.name);
-					}
-
-					await this.addUserToGroup(user.id, group.id);
-
-					validGroupNames.add(unit.name.toLowerCase());
-				}
-			}
-
-			const adminGroup = await this.ensureAdminGroup();
-			const admins = await this.getAllAdmins();
-
-			for (const admin of admins) {
-				const user = await this.findUserByEmail(admin.email);
-				if (user) {
-					await this.addUserToGroup(user.id, adminGroup.id);
-
-					await this.makeUserAdmin(user.id, admin.email);
-				}
-			}
-
-			for (const group of existingGroups) {
-				const groupNameLower = group.name.toLowerCase();
-
-				if (groupNameLower === this.ADMIN_GROUP_NAME.toLowerCase()) {
-					continue;
-				}
-
-				if (!validGroupNames.has(groupNameLower)) {
-					await this.deleteGroup(group.id);
-					logger.info('Group deleted as it is no longer needed', { groupName: group.name });
-				}
-			}
-
-			for (const group of existingGroups) {
-				const groupName = group.name;
-
-				const groupMembers = await this.getGroupMembers(group.id);
-
-				if (groupName.toLowerCase() === this.ADMIN_GROUP_NAME.toLowerCase()) {
-					for (const member of groupMembers) {
-						const isAdmin = admins.some((admin) => admin.email === member.email);
-						if (!isAdmin) {
-							await this.removeUserFromGroup(member.id, group.id);
-
-							await this.removeUserAdmin(member.id, member.email);
-						}
-					}
-				} else {
-					for (const member of groupMembers) {
-						const user = activeUsers.find((u) => u.id === member.id);
-						if (!user) continue;
-
-						const memberUnits = userUnitsMap[user.email] || [];
-						const shouldBeInGroup = memberUnits.some((unit) => unit.name.toLowerCase() === groupName.toLowerCase());
-
-						if (!shouldBeInGroup) {
-							logger.info('Removing user from group they no longer belong to', {
-								email: user.email,
-								groupName: group.name,
-							});
-							await this.removeUserFromGroup(member.id, group.id);
-						}
-					}
-				}
-			}
-
-			logger.info('User synchronization completed successfully');
-			return { success: true };
-		} catch (error) {
-			logger.error('Error during user synchronization', {
-				errorMessage: error.message,
-				stack: error.stack,
-			});
-
-			return {
-				success: false,
-				error: error.message,
-			};
+		if (!activeUsers.length) {
+			logger.warn('No active users found, sync cannot proceed');
+			throw new Error('No active users found');
 		}
+
+		logger.info('Starting user synchronization', {
+			activeUsersCount: activeUsers.length,
+			existingGroupsCount: existingGroups.length,
+			allowedUnitsMode: allowedUnits === null ? 'all allowed' : `${allowedUnits.length} units allowed`,
+		});
+
+		const userUnitsMap = {};
+		let totalUnitsFound = 0;
+
+		for (const user of activeUsers) {
+			const units = await this.getUserUnits(user.email);
+
+			const filteredUnits = allowedUnits === null ? units : units.filter((unit) => this.isUnitAllowed(unit, allowedUnits));
+
+			userUnitsMap[user.email] = filteredUnits;
+			totalUnitsFound += filteredUnits.length;
+
+			logger.info('Retrieved units for user', {
+				email: user.email,
+				totalUnits: units.length,
+				allowedUnits: filteredUnits.length,
+			});
+		}
+
+		logger.info('Unit data retrieval completed', {
+			totalUsers: activeUsers.length,
+			totalAllowedUnitsFound: totalUnitsFound,
+		});
+
+		const validGroupNames = new Set();
+		validGroupNames.add(this.ADMIN_GROUP_NAME.toLowerCase());
+
+		for (const user of activeUsers) {
+			const unitsForUser = userUnitsMap[user.email] || [];
+			logger.info('Processing user units', {
+				email: user.email,
+				unitCount: unitsForUser.length,
+			});
+
+			for (const unit of unitsForUser) {
+				let group = await this.findGroupByName(unit.name);
+
+				if (!group) {
+					group = await this.createGroup(unit.name);
+				}
+
+				await this.addUserToGroup(user.id, group.id);
+
+				validGroupNames.add(unit.name.toLowerCase());
+			}
+		}
+
+		const adminGroup = await this.ensureAdminGroup();
+		const admins = await this.getAllAdmins();
+
+		for (const admin of admins) {
+			const user = await this.findUserByEmail(admin.email);
+			if (user) {
+				await this.addUserToGroup(user.id, adminGroup.id);
+
+				await this.makeUserAdmin(user.id, admin.email);
+			}
+		}
+
+		for (const group of existingGroups) {
+			const groupNameLower = group.name.toLowerCase();
+
+			if (groupNameLower === this.ADMIN_GROUP_NAME.toLowerCase()) {
+				continue;
+			}
+
+			if (!validGroupNames.has(groupNameLower)) {
+				await this.deleteGroup(group.id);
+				logger.info('Obsolete group deleted', { groupName: group.name });
+			}
+		}
+
+		for (const group of existingGroups) {
+			const groupName = group.name;
+
+			const groupMembers = await this.getGroupMembers(group.id);
+
+			if (groupName.toLowerCase() === this.ADMIN_GROUP_NAME.toLowerCase()) {
+				for (const member of groupMembers) {
+					const isAdmin = admins.some((admin) => admin.email === member.email);
+					if (!isAdmin) {
+						await this.removeUserFromGroup(member.id, group.id);
+
+						await this.removeUserAdmin(member.id, member.email);
+					}
+				}
+			} else {
+				for (const member of groupMembers) {
+					const user = activeUsers.find((u) => u.id === member.id);
+					if (!user) continue;
+
+					const memberUnits = userUnitsMap[user.email] || [];
+					const shouldBeInGroup = memberUnits.some((unit) => unit.name.toLowerCase() === groupName.toLowerCase());
+
+					if (!shouldBeInGroup) {
+						logger.debug('Removing user from obsolete group', {
+							email: user.email,
+							groupName: group.name,
+						});
+						await this.removeUserFromGroup(member.id, group.id);
+					}
+				}
+			}
+		}
+
+		logger.info('User synchronization completed successfully');
 	}
 
 	/**
@@ -738,136 +804,113 @@ class OutlineSync {
 	 * @returns {Object} - Admin group
 	 */
 	async ensureAdminGroup() {
-		let adminGroup = await this.findGroupByName(this.ADMIN_GROUP_NAME);
+		try {
+			let adminGroup = await this.findGroupByName(this.ADMIN_GROUP_NAME);
 
-		if (!adminGroup) {
-			adminGroup = await this.createGroup(this.ADMIN_GROUP_NAME);
+			if (!adminGroup) {
+				adminGroup = await this.createGroup(this.ADMIN_GROUP_NAME);
+			}
+
+			return adminGroup;
+		} catch (error) {
+			logger.error('CRITICAL: Failed to ensure admin group exists', { error: error.message });
+			throw error;
 		}
-
-		return adminGroup;
 	}
 
 	/**
 	 * Synchronize admin users
-	 * @returns {Object} - Sync results including success status
 	 */
 	async syncAdmins() {
-		try {
-			const epflAdmins = await this.getAllAdmins();
-			const existingAdminUsers = await this.getAllAdminUsers();
+		const epflAdmins = await this.getAllAdmins();
+		const existingAdminUsers = await this.getAllAdminUsers();
 
-			const adminGroup = await this.ensureAdminGroup();
+		const adminGroup = await this.ensureAdminGroup();
 
-			logger.info('Starting admin synchronization', {
-				adminsCount: epflAdmins.length,
-				existingAdminUsersCount: existingAdminUsers.length,
-			});
+		logger.info('Starting admin synchronization', {
+			adminsCount: epflAdmins.length,
+			existingAdminUsersCount: existingAdminUsers.length,
+		});
 
-			for (const admin of epflAdmins) {
-				const user = await this.findUserByEmail(admin.email);
-				if (user) {
-					const isAdminAlready = existingAdminUsers.some((existingAdmin) => existingAdmin.id === user.id);
+		for (const admin of epflAdmins) {
+			const user = await this.findUserByEmail(admin.email);
+			if (user) {
+				const isAdminAlready = existingAdminUsers.some((existingAdmin) => existingAdmin.id === user.id);
 
-					await this.addUserToGroup(user.id, adminGroup.id);
+				await this.addUserToGroup(user.id, adminGroup.id);
 
-					if (!isAdminAlready) {
-						await this.makeUserAdmin(user.id, admin.email);
-					}
-				} else {
-					logger.warn('User not found for admin', { email: admin.email });
+				if (!isAdminAlready) {
+					await this.makeUserAdmin(user.id, admin.email);
 				}
+			} else {
+				logger.warn('User not found for admin', { email: admin.email });
 			}
-
-			for (const existingAdmin of existingAdminUsers) {
-				const isStillAdmin = epflAdmins.some((admin) => admin.email === existingAdmin.email);
-
-				if (!isStillAdmin) {
-					await this.removeUserAdmin(existingAdmin.id, existingAdmin.email);
-
-					await this.removeUserFromGroup(existingAdmin.id, adminGroup.id);
-				}
-			}
-
-			logger.info('Admin synchronization completed successfully');
-			return { success: true };
-		} catch (error) {
-			logger.error('Error during admin synchronization', {
-				errorMessage: error.message,
-				stack: error.stack,
-			});
-
-			return {
-				success: false,
-				error: error.message,
-			};
 		}
+
+		for (const existingAdmin of existingAdminUsers) {
+			const isStillAdmin = epflAdmins.some((admin) => admin.email === existingAdmin.email);
+
+			if (!isStillAdmin) {
+				await this.removeUserAdmin(existingAdmin.id, existingAdmin.email);
+
+				await this.removeUserFromGroup(existingAdmin.id, adminGroup.id);
+			}
+		}
+
+		logger.info('Admin synchronization completed successfully');
 	}
 
 	/**
 	 * Synchronize collections based on groups
-	 * @returns {Object} - Sync results including success status
 	 */
 	async syncCollections() {
-		try {
-			const groups = await this.getAllGroups();
-			const collections = await this.getAllCollections();
-			const adminGroup = await this.ensureAdminGroup();
+		const groups = await this.getAllGroups();
+		const collections = await this.getAllCollections();
+		await this.ensureAdminGroup();
 
-			const groupNames = groups.filter((g) => g.name.toLowerCase() !== this.ADMIN_GROUP_NAME.toLowerCase()).map((g) => g.name.toLowerCase());
+		const groupNames = groups.filter((g) => g.name.toLowerCase() !== this.ADMIN_GROUP_NAME.toLowerCase()).map((g) => g.name.toLowerCase());
 
-			logger.info('Starting collection synchronization', {
-				groupsCount: groups.length,
-				collectionsCount: collections.length,
-			});
+		logger.info('Starting collection synchronization', {
+			groupsCount: groups.length,
+			collectionsCount: collections.length,
+		});
 
-			for (const group of groups) {
-				if (group.name.toLowerCase() === this.ADMIN_GROUP_NAME.toLowerCase()) {
-					continue;
-				}
-
-				let collection = await this.findCollectionByName(group.name);
-
-				if (!collection) {
-					collection = await this.createCollection(group.name, false);
-				}
-
-				await this.addGroupToCollection(group.id, collection.id, 'read_write');
+		for (const group of groups) {
+			if (group.name.toLowerCase() === this.ADMIN_GROUP_NAME.toLowerCase()) {
+				continue;
 			}
 
-			for (const collection of collections) {
-				const collectionName = collection.name.toLowerCase();
+			let collection = await this.findCollectionByName(group.name);
 
-				if (collectionName === this.ADMIN_GROUP_NAME.toLowerCase()) {
-					continue;
-				}
-
-				if (this.ALLOWED_COLLECTIONS.includes(collectionName)) {
-					continue;
-				}
-
-				const hasMatchingGroup = groupNames.includes(collectionName);
-
-				if (!hasMatchingGroup) {
-					await this.deleteCollection(collection.id);
-					logger.info('Collection deleted as it no longer has a corresponding group', {
-						collectionName: collection.name,
-					});
-				}
+			if (!collection) {
+				collection = await this.createCollection(group.name, false);
 			}
 
-			logger.info('Collection synchronization completed successfully');
-			return { success: true };
-		} catch (error) {
-			logger.error('Error during collection synchronization', {
-				errorMessage: error.message,
-				stack: error.stack,
-			});
-
-			return {
-				success: false,
-				error: error.message,
-			};
+			await this.addGroupToCollection(group.id, collection.id, 'read_write');
 		}
+
+		for (const collection of collections) {
+			const collectionName = collection.name.toLowerCase();
+
+			if (collectionName === this.ADMIN_GROUP_NAME.toLowerCase()) {
+				continue;
+			}
+
+			if (this.ALLOWED_COLLECTIONS.includes(collectionName)) {
+				continue;
+			}
+
+			const hasMatchingGroup = groupNames.includes(collectionName);
+
+			if (!hasMatchingGroup) {
+				await this.deleteCollection(collection.id);
+				logger.info('Obsolete collection deleted', {
+					collectionName: collection.name,
+				});
+			}
+		}
+
+		logger.info('Collection synchronization completed successfully');
 	}
 }
 
@@ -889,38 +932,18 @@ async function main() {
 		const outlineSync = new OutlineSync(process.env.OUTLINE_BASE_URL, process.env.OUTLINE_API_TOKEN);
 
 		logger.info('Starting user synchronization process');
-		const userResult = await outlineSync.syncUsers();
-		if (!userResult.success) {
-			exitCode = 1;
-			logger.error('User synchronization failed', {
-				reason: userResult.reason || userResult.error || 'Unknown error',
-			});
-		}
+		await outlineSync.syncUsers();
 
 		logger.info('Starting admin synchronization process');
-		const adminResult = await outlineSync.syncAdmins();
-		if (!adminResult.success) {
-			exitCode = 1;
-			logger.error('Admin synchronization failed', {
-				reason: adminResult.reason || adminResult.error || 'Unknown error',
-			});
-		}
+		await outlineSync.syncAdmins();
 
 		logger.info('Starting collection synchronization process');
-		const collectionResult = await outlineSync.syncCollections();
-		if (!collectionResult.success) {
-			exitCode = 1;
-			logger.error('Collection synchronization failed', {
-				reason: collectionResult.reason || collectionResult.error || 'Unknown error',
-			});
-		}
+		await outlineSync.syncCollections();
 
-		logger.info('Complete synchronization process finished', {
-			status: exitCode === 0 ? 'success' : 'partial failure',
-		});
+		logger.info('Complete synchronization process finished successfully');
 	} catch (error) {
 		exitCode = 1;
-		logger.error('Synchronization failed with unexpected error', {
+		logger.error('Synchronization failed - script terminated', {
 			errorMessage: error.message,
 			stack: error.stack,
 		});
