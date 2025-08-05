@@ -151,7 +151,6 @@ class OutlineSync {
 				}
 			} while (total !== null && results.length < total);
 
-			// Return the first response structure but with all results
 			if (firstResponse) {
 				return {
 					...firstResponse.data,
