@@ -9,7 +9,7 @@
         namespace: "{{ openshift_namespace }}"
       spec:
         cluster:
-          name: postgres-cluster
+          name: "{{ postgres.cluster.name }}"
         name: "{{ app.name + database.name_suffix }}"
         owner: "{{ app.name + database.user_suffix }}"
         passwordSecret:
@@ -25,7 +25,7 @@
         name: "{{ app.name }}-scheduled-backup"
         namespace: "{{ openshift_namespace }}"
       spec:
-        schedule: "0 0 2 * * *"
-        backupOwnerReference: self
+        schedule: "{{ postgres.backup.schedule }}"
+        backupOwnerReference: "{{ postgres.backup.owner_reference }}"
         cluster:
-          name: postgres-cluster
+          name: "{{ postgres.cluster.name }}"
