@@ -1,0 +1,56 @@
+app:
+  name: outlinewiki
+  display_name: SiDoc
+  subdomain: sidoc
+  version: 0.84.10
+
+registry:
+  url: quay-its.epfl.ch
+  organization: svc0070
+
+database:
+  host: postgres-cluster-rw
+  name_suffix: -db
+  user_suffix: -user
+
+storage:
+  class: wiki
+  uploads_size: 10Gi
+  redis_size: 1Gi
+
+redis:
+  image: quay-its.epfl.ch/svc0176/redis:8.0-M04
+  port: 6379
+
+autoscaling:
+  min_replicas: 2
+  max_replicas: 4
+  memory_threshold: 95
+  scale_up_window: 60
+  scale_down_window: 300
+
+sync:
+  schedule: "30 * * * *"
+  image_version: 1.9.0
+  admin_group: sidoc-admins
+
+init:
+  image_version: 1.1.1
+  admin_email: admin@epfl.ch
+  admin_name: EPFL Admin
+  job_timeout: 600
+  backoff_limit: 3
+
+monitoring:
+  exporter_version: 1.3.1
+  probe_interval: 30s
+  probe_timeout: 10s
+
+smtp:
+  host: mail.epfl.ch
+  port: 587
+  secure: "false"
+
+file_storage:
+  type: local
+  max_upload_size: 8589934592
