@@ -1,3 +1,11 @@
+- name: Include variable files
+  include_vars: "{{ item }}"
+  loop:
+    - config.yml
+    - units.yml
+    - postgres.yml
+    - resources.yml
+
 - name: Generate or Retrieve Secrets
   include_tasks:
     file: secrets.yml
