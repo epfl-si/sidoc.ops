@@ -825,11 +825,10 @@ class OutlineSync {
 
 			if (groupName.toLowerCase() === this.ADMIN_GROUP_NAME.toLowerCase()) {
 				for (const member of groupMembers) {
-					const isAdmin = admins.some((admin) => admin.email === member.email);
+					const user = await this.findUserById(member.id);
+					const isAdmin = admins.some((admin) => admin.email === user.email);
 					if (!isAdmin) {
 						await this.removeUserFromGroup(member.id, group.id);
-
-						await this.removeUserAdmin(member.id, member.email);
 					}
 				}
 			} else {
