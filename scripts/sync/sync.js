@@ -172,7 +172,7 @@ class OutlineSync {
 	/**
 	 * Get units for a user by email
 	 * @param {String} email - User email
-	 * @returns {Array} - List of units
+	 * @returns {Array|null} - List of units or null if user doesn't exist
 	 */
 	async getUserUnits(email) {
 		try {
@@ -193,6 +193,11 @@ class OutlineSync {
 
 			return unitsResponse.data.units || [];
 		} catch (error) {
+			if (error.response && error.response.status === 404) {
+				logger.warn(`User ${email} no longer exists in EPFL directory`, { email });
+				return null;
+			}
+
 			logger.error(`Failed to retrieve units for user ${email}`, {
 				email,
 				error: error.message,
@@ -573,6 +578,50 @@ class OutlineSync {
 	}
 
 	/**
+	 * Suspend a user
+	 * @param {String} userId - User ID
+	 * @param {String} email - User email for logging
+	 * @returns {Boolean} - Success status
+	 */
+	async suspendUser(userId, email) {
+		try {
+			await this.outlineClient.post('/api/users.suspend', { id: userId });
+			logger.info('User suspended', { userId, email });
+			return true;
+		} catch (error) {
+			logger.error(`Failed to suspend user ${email}`, { userId, error: error.message });
+			throw error;
+		}
+	}
+
+	/**
+	 * Remove user from all groups
+	 * @param {String} userId - User ID
+	 * @param {String} email - User email for logging
+	 * @returns {Boolean} - Success status
+	 */
+	async removeUserFromAllGroups(userId, email) {
+		try {
+			const groups = await this.getAllGroups();
+			let removedFromCount = 0;
+
+			for (const group of groups) {
+				const isUserInGroup = await this.isUserInGroup(userId, group.id);
+				if (isUserInGroup) {
+					await this.removeUserFromGroup(userId, group.id);
+					removedFromCount++;
+				}
+			}
+
+			logger.info('User removed from all groups', { userId, email, groupsCount: removedFromCount });
+			return true;
+		} catch (error) {
+			logger.error(`Failed to remove user ${email} from all groups`, { userId, error: error.message });
+			throw error;
+		}
+	}
+
+	/**
 	 * Check if a group is already in a collection
 	 * @param {String} groupId - Group ID
 	 * @param {String} collectionId - Collection ID
@@ -753,6 +802,19 @@ class OutlineSync {
 
 		for (const user of activeUsers) {
 			const units = await this.getUserUnits(user.email);
+
+			if (units === null) {
+				logger.warn(`User ${user.email} no longer exists, suspending and removing from all groups`, {
+					userId: user.id,
+					email: user.email
+				});
+
+				await this.removeUserFromAllGroups(user.id, user.email);
+				await this.suspendUser(user.id, user.email);
+
+				userUnitsMap[user.email] = [];
+				continue;
+			}
 
 			const filteredUnits = allowedUnits === null ? units : units.filter((unit) => this.isUnitAllowed(unit, allowedUnits));
 
