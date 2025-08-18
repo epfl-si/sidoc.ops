@@ -340,6 +340,21 @@ class OutlineSync {
 	}
 
 	/**
+	 * Find a user by ID
+	 * @param {String} userId - User ID
+	 * @returns {Object|null} - User object or null if not found
+	 * */
+	async findUserById(userId) {
+		try {
+			const users = await this.getAllUsers();
+			return users.find((u) => u.id === userId) || null;
+		} catch (error) {
+			logger.error(`Failed to find user by ID ${userId}`, { error: error.message });
+			throw error;
+		}
+	}
+
+	/**
 	 * Find a group by name (case-insensitive)
 	 * @param {String} name - Group name
 	 * @returns {Object|null} - Group object or null if not found
