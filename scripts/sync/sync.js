@@ -598,6 +598,12 @@ class OutlineSync {
 	 */
 	async addGroupToCollection(groupId, collectionId, permission = 'read_write') {
 		try {
+			const isAlreadyInCollection = await this.isGroupInCollection(groupId, collectionId);
+			if (isAlreadyInCollection) {
+				logger.debug('Group already in collection', { groupId, collectionId });
+				return true;
+			}
+
 			await this.outlineClient.post('/api/collections.add_group', {
 				id: collectionId,
 				groupId,
