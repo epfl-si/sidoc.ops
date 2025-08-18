@@ -801,7 +801,6 @@ class OutlineSync {
 			const user = await this.findUserByEmail(admin.email);
 			if (user) {
 				await this.addUserToGroup(user.id, adminGroup.id);
-
 				await this.makeUserAdmin(user.id, admin.email);
 			}
 		}
