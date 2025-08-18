@@ -484,6 +484,22 @@ class OutlineSync {
 	}
 
 	/**
+	 * Check if a user is already in a group
+	 * @param {String} userId - User ID
+	 * @param {String} groupId - Group ID
+	 * @returns {Boolean} - Whether the user is already in the group
+	 */
+	async isUserInGroup(userId, groupId) {
+		try {
+			const groupMembers = await this.getGroupMembers(groupId);
+			return groupMembers.some(member => member.id === userId);
+		} catch (error) {
+			logger.debug(`Failed to check user membership in group ${groupId}`, { error: error.message });
+			return false;
+		}
+	}
+
+	/**
 	 * Add a user to a group
 	 * @param {String} userId - User ID
 	 * @param {String} groupId - Group ID
