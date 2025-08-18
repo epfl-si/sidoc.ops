@@ -645,7 +645,7 @@ class OutlineSync {
 	async removeUserFromGroup(userId, groupId) {
 		try {
 			await this.outlineClient.post('/api/groups.remove_user', { id: groupId, userId });
-			logger.debug('User removed from group', { groupId, userId });
+			logger.info('User removed from group', { groupId, userId });
 			return true;
 		} catch (error) {
 			logger.error(`Failed to remove user ${userId} from group ${groupId}`, { error: error.message });
@@ -661,7 +661,8 @@ class OutlineSync {
 	async getGroupMembers(groupId) {
 		try {
 			const response = await this._makeOutlineApiCall('POST', '/api/groups.memberships', { id: groupId });
-			return response.data.users || [];
+			const users = response.data.flatMap(item => item.users || []);
+			return users;
 		} catch (error) {
 			logger.error(`Failed to get members of group ${groupId}`, { error: error.message });
 			throw error;
