@@ -5,6 +5,8 @@
     - units.yml
     - postgres.yml
     - resources.yml
+  tags:
+    - always
 
 - name: Generate or Retrieve Secrets
   include_tasks:
