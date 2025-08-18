@@ -541,6 +541,23 @@ class OutlineSync {
 	}
 
 	/**
+	 * Check if a group is already in a collection
+	 * @param {String} groupId - Group ID
+	 * @param {String} collectionId - Collection ID
+	 * @returns {Boolean} - Whether the group is already in the collection
+	 */
+	async isGroupInCollection(groupId, collectionId) {
+		try {
+			const response = await this._makeOutlineApiCall('POST', '/api/collections.group_memberships', { id: collectionId });
+			const groups = response.data.flatMap(item => item.groups || []);
+			return groups.some(group => group.id === groupId);
+		} catch (error) {
+			logger.debug(`Failed to check group membership in collection ${collectionId}`, { error: error.message });
+			return false;
+		}
+	}
+
+	/**
 	 * Add group to a collection
 	 * @param {String} groupId - Group ID
 	 * @param {String} collectionId - Collection ID
