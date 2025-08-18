@@ -507,15 +507,16 @@ class OutlineSync {
 	 */
 	async addUserToGroup(userId, groupId) {
 		try {
-			await this.outlineClient.post('/api/groups.add_user', { id: groupId, userId });
-			logger.debug('User added to group', { groupId, userId });
-			return true;
-		} catch (error) {
-			if (error.response && error.response.status === 400 && error.response.data.message && error.response.data.message.includes('already a member')) {
+			const isAlreadyInGroup = await this.isUserInGroup(userId, groupId);
+			if (isAlreadyInGroup) {
 				logger.debug('User already in group', { groupId, userId });
 				return true;
 			}
 
+			await this.outlineClient.post('/api/groups.add_user', { id: groupId, userId });
+			logger.info('User added to group', { groupId, userId });
+			return true;
+		} catch (error) {
 			logger.error(`Failed to add user ${userId} to group ${groupId}`, { error: error.message });
 			throw error;
 		}
