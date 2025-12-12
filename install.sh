@@ -199,8 +199,11 @@ install_zsh_completion() {
     local tmp_file=$(mktemp)
     cp "$completion_file" "$tmp_file"
 
+    info "File copied to temporary location $tmp_file"
+
     # Check if we need sudo
     if [[ -w "$target_dir" ]]; then
+        info "Installing completion to ${target_dir}/_${CLI_NAME}... without sudo"
         mv "$tmp_file" "${target_dir}/_${CLI_NAME}"
     else
         info "Need sudo to install completion to ${target_dir}..."
