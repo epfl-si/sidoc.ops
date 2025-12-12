@@ -37,41 +37,38 @@ warning() {
 detect_shell() {
     local shell_name=""
 
-    # First try $0 which contains the shell name
-    case "$0" in
-        *bash|*-bash)
-            shell_name="bash"
-            ;;
-        *zsh|*-zsh)
-            shell_name="zsh"
-            ;;
-        *fish|*-fish)
-            shell_name="fish"
-            ;;
-    esac
+    echo $SHELL
+    # Get parent process (the shell that called this script)
+    local ppid=$(ps -p $$ -o ppid= 2>/dev/null | tr -d ' ')
 
-    # If $0 didn't work, try shell version variables
+    if [[ -n "$ppid" ]]; then
+        local parent_shell=$(ps -p "$ppid" -o comm= 2>/dev/null || echo "")
+        case "$parent_shell" in
+            *bash*)
+                shell_name="bash"
+                ;;
+            *zsh*)
+                shell_name="zsh"
+                ;;
+            *fish*)
+                shell_name="fish"
+                ;;
+        esac
+    fi
+
+    # Fallback to SHELL variable if ps didn't work
     if [[ -z "$shell_name" ]]; then
-        if [[ -n "${BASH_VERSION:-}" ]]; then
-            shell_name="bash"
-        elif [[ -n "${ZSH_VERSION:-}" ]]; then
-            shell_name="zsh"
-        elif [[ -n "${FISH_VERSION:-}" ]]; then
-            shell_name="fish"
-        else
-            # Last resort: check SHELL variable
-            case "${SHELL:-}" in
-                */bash)
-                    shell_name="bash"
-                    ;;
-                */zsh)
-                    shell_name="zsh"
-                    ;;
-                */fish)
-                    shell_name="fish"
-                    ;;
-            esac
-        fi
+        case "${SHELL:-}" in
+            */bash)
+                shell_name="bash"
+                ;;
+            */zsh)
+                shell_name="zsh"
+                ;;
+            */fish)
+                shell_name="fish"
+                ;;
+        esac
     fi
 
     echo "$shell_name"
