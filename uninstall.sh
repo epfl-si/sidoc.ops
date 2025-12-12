@@ -87,9 +87,9 @@ uninstall_bash_completion() {
 # Uninstall zsh completion
 uninstall_zsh_completion() {
     local completion_dirs=(
-        "/usr/local/share/zsh/site-functions/_${CLI_NAME}"
-        "/usr/share/zsh/site-functions/_${CLI_NAME}"
-        "$HOME/.local/share/zsh/site-functions/_${CLI_NAME}"
+        "/usr/local/share/zsh/site-functions/${CLI_NAME}.zsh"
+        "/usr/share/zsh/site-functions/${CLI_NAME}.zsh"
+        "$HOME/.local/share/zsh/site-functions/${CLI_NAME}.zsh"
     )
 
     local found=false

@@ -140,7 +140,7 @@ install_bash_completion() {
 
 # Install zsh completion
 install_zsh_completion() {
-    local completion_file="${SCRIPT_DIR}/completions/_sidoc-cli"
+    local completion_file="${SCRIPT_DIR}/completions/sidoc-cli.zsh"
     local completion_dirs=(
         "/usr/local/share/zsh/site-functions"
         "/usr/share/zsh/site-functions"
@@ -172,19 +172,20 @@ install_zsh_completion() {
             echo "" >> "$zshrc"
             echo "# Added by sidoc-cli installer" >> "$zshrc"
             echo "fpath=($target_dir \$fpath)" >> "$zshrc"
+            echo "autoload -Uz compinit && compinit" >> "$zshrc"
             info "Added $target_dir to fpath in $zshrc"
         fi
     fi
 
     # Check if we need sudo
     if [[ -w "$target_dir" ]]; then
-        cp "$completion_file" "${target_dir}/_${CLI_NAME}"
+        cp "$completion_file" "${target_dir}/${CLI_NAME}.zsh"
     else
         info "Need sudo to install completion to ${target_dir}..."
-        sudo cp "$completion_file" "${target_dir}/_${CLI_NAME}"
+        sudo cp "$completion_file" "${target_dir}/${CLI_NAME}.zsh"
     fi
 
-    success "Zsh completion installed to ${target_dir}/_${CLI_NAME}"
+    success "Zsh completion installed to ${target_dir}/${CLI_NAME}.zsh"
     info "Reload your shell or run: exec zsh"
 }
 
