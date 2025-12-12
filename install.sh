@@ -166,26 +166,48 @@ install_zsh_completion() {
         target_dir="$HOME/.local/share/zsh/site-functions"
         mkdir -p "$target_dir"
 
-        # Add to fpath if not already there
+        # Add to fpath if not already there (must be BEFORE compinit)
         local zshrc="$HOME/.zshrc"
-        if [[ -f "$zshrc" ]] && ! grep -q "fpath.*$target_dir" "$zshrc"; then
-            echo "" >> "$zshrc"
-            echo "# Added by sidoc-cli installer" >> "$zshrc"
-            echo "fpath=($target_dir \$fpath)" >> "$zshrc"
-            echo "autoload -Uz compinit && compinit" >> "$zshrc"
-            info "Added $target_dir to fpath in $zshrc"
+        if [[ -f "$zshrc" ]] && ! grep -q "sidoc-cli installer" "$zshrc"; then
+            # Find if there's already a compinit call
+            if grep -q "autoload.*compinit" "$zshrc"; then
+                # Insert fpath before the compinit line
+                local temp_file=$(mktemp)
+                awk -v dir="$target_dir" '
+                    /autoload.*compinit/ && !inserted {
+                        print ""
+                        print "# Added by sidoc-cli installer"
+                        print "fpath=(" dir " $fpath)"
+                        inserted=1
+                    }
+                    {print}
+                ' "$zshrc" > "$temp_file"
+                mv "$temp_file" "$zshrc"
+                info "Added $target_dir to fpath before compinit in $zshrc"
+            else
+                # No compinit found, add both
+                echo "" >> "$zshrc"
+                echo "# Added by sidoc-cli installer" >> "$zshrc"
+                echo "fpath=($target_dir \$fpath)" >> "$zshrc"
+                echo "autoload -Uz compinit && compinit" >> "$zshrc"
+                info "Added $target_dir to fpath and compinit in $zshrc"
+            fi
         fi
     fi
 
+    # Copy to tmp first, then create the properly named file
+    local tmp_file=$(mktemp)
+    cp "$completion_file" "$tmp_file"
+
     # Check if we need sudo
     if [[ -w "$target_dir" ]]; then
-        cp "$completion_file" "${target_dir}/${CLI_NAME}.zsh"
+        mv "$tmp_file" "${target_dir}/_${CLI_NAME}"
     else
         info "Need sudo to install completion to ${target_dir}..."
-        sudo cp "$completion_file" "${target_dir}/${CLI_NAME}.zsh"
+        sudo mv "$tmp_file" "${target_dir}/_${CLI_NAME}"
     fi
 
-    success "Zsh completion installed to ${target_dir}/${CLI_NAME}.zsh"
+    success "Zsh completion installed to ${target_dir}/_${CLI_NAME}"
     info "Reload your shell or run: exec zsh"
 }
 
