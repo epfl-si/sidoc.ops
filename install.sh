@@ -37,25 +37,41 @@ warning() {
 detect_shell() {
     local shell_name=""
 
-    if [[ -n "${BASH_VERSION:-}" ]]; then
-        shell_name="bash"
-    elif [[ -n "${ZSH_VERSION:-}" ]]; then
-        shell_name="zsh"
-    elif [[ -n "${FISH_VERSION:-}" ]]; then
-        shell_name="fish"
-    else
-        # Try to detect from SHELL variable
-        case "${SHELL:-}" in
-            */bash)
-                shell_name="bash"
-                ;;
-            */zsh)
-                shell_name="zsh"
-                ;;
-            */fish)
-                shell_name="fish"
-                ;;
-        esac
+    # First try $0 which contains the shell name
+    case "$0" in
+        *bash|*-bash)
+            shell_name="bash"
+            ;;
+        *zsh|*-zsh)
+            shell_name="zsh"
+            ;;
+        *fish|*-fish)
+            shell_name="fish"
+            ;;
+    esac
+
+    # If $0 didn't work, try shell version variables
+    if [[ -z "$shell_name" ]]; then
+        if [[ -n "${BASH_VERSION:-}" ]]; then
+            shell_name="bash"
+        elif [[ -n "${ZSH_VERSION:-}" ]]; then
+            shell_name="zsh"
+        elif [[ -n "${FISH_VERSION:-}" ]]; then
+            shell_name="fish"
+        else
+            # Last resort: check SHELL variable
+            case "${SHELL:-}" in
+                */bash)
+                    shell_name="bash"
+                    ;;
+                */zsh)
+                    shell_name="zsh"
+                    ;;
+                */fish)
+                    shell_name="fish"
+                    ;;
+            esac
+        fi
     fi
 
     echo "$shell_name"
