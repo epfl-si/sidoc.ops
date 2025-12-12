@@ -37,7 +37,6 @@ warning() {
 detect_shell() {
     local shell_name=""
 
-    echo $SHELL
     # Get parent process (the shell that called this script)
     local ppid=$(ps -p $$ -o ppid= 2>/dev/null | tr -d ' ')
 
@@ -58,7 +57,9 @@ detect_shell() {
 
     # Fallback to SHELL variable if ps didn't work
     if [[ -z "$shell_name" ]]; then
-        case "${SHELL:-}" in
+        local shell_path="${SHELL:-}"
+        # Extract just the shell name from the path
+        case "$shell_path" in
             */bash)
                 shell_name="bash"
                 ;;
@@ -67,6 +68,17 @@ detect_shell() {
                 ;;
             */fish)
                 shell_name="fish"
+                ;;
+            *)
+                # Last resort: extract basename
+                if [[ -n "$shell_path" ]]; then
+                    local basename="${shell_path##*/}"
+                    case "$basename" in
+                        bash|zsh|fish)
+                            shell_name="$basename"
+                            ;;
+                    esac
+                fi
                 ;;
         esac
     fi
