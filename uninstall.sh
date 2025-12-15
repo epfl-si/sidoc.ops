@@ -1,59 +1,73 @@
-#!/usr/bin/env bash
-
+#!/bin/bash
 set -euo pipefail
 
-# Colors for output
+INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+CLI_NAME="sidoc-cli"
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+MAGENTA='\033[0;35m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+DIM='\033[2m'
+RESET='\033[0m'
 
-# Configuration
-INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
-CLI_NAME="sidoc-cli"
+CHECK="${GREEN}✓${RESET}"
+CROSS="${RED}✗${RESET}"
+ARROW="${BLUE}→${RESET}"
+INFO="${CYAN}ℹ${RESET}"
+WARN="${YELLOW}⚠${RESET}"
 
-# Helper functions
-error() {
-    echo -e "${RED}Error:${NC} $1" >&2
+print_header() {
+    echo -e "\n${BOLD}${MAGENTA}╔════════════════════════════════════╗${RESET}"
+    echo -e "${BOLD}${MAGENTA}║${RESET}       ${BOLD}SIDOC CLI Uninstaller${RESET}        ${BOLD}${MAGENTA}║${RESET}"
+    echo -e "${BOLD}${MAGENTA}╚════════════════════════════════════╝${RESET}\n"
+}
+
+print_step() {
+    echo -e "${ARROW} ${BOLD}$1${RESET}"
+}
+
+print_success() {
+    echo -e "  ${CHECK} $1"
+}
+
+print_error() {
+    echo -e "  ${CROSS} $1" >&2
     exit 1
 }
 
-success() {
-    echo -e "${GREEN}✓${NC} $1"
+print_info() {
+    echo -e "  ${INFO} ${DIM}$1${RESET}"
 }
 
-info() {
-    echo -e "${BLUE}ℹ${NC} $1"
+print_warn() {
+    echo -e "  ${WARN} $1"
 }
 
-warning() {
-    echo -e "${YELLOW}⚠${NC} $1"
-}
-
-# Uninstall CLI binary
 uninstall_cli() {
     local cli_path="${INSTALL_DIR}/${CLI_NAME}"
 
     if [[ ! -e "$cli_path" ]]; then
-        warning "CLI not found at $cli_path"
+        print_warn "CLI not found at $cli_path"
         return 1
     fi
 
-    info "Removing sidoc-cli from ${INSTALL_DIR}..."
+    print_step "Removing sidoc-cli from ${INSTALL_DIR}"
 
-    # Check if we need sudo
     if [[ -w "$INSTALL_DIR" ]]; then
         rm -f "$cli_path"
     else
-        info "Need sudo to remove from ${INSTALL_DIR}..."
+        print_info "Need sudo to remove from ${INSTALL_DIR}"
         sudo rm -f "$cli_path"
     fi
 
-    success "sidoc-cli removed from ${INSTALL_DIR}"
+    print_success "sidoc-cli removed from ${INSTALL_DIR}"
+    echo
 }
 
-# Uninstall bash completion
 uninstall_bash_completion() {
     local completion_dirs=(
         "/etc/bash_completion.d/${CLI_NAME}"
@@ -71,20 +85,19 @@ uninstall_bash_completion() {
             if [[ -w "$dir" ]]; then
                 rm -f "$completion_file"
             else
-                info "Need sudo to remove completion from $(dirname $completion_file)..."
+                print_info "Need sudo to remove completion from $(dirname $completion_file)"
                 sudo rm -f "$completion_file"
             fi
 
-            success "Bash completion removed from $completion_file"
+            print_success "Bash completion removed from $completion_file"
         fi
     done
 
     if [[ "$found" == false ]]; then
-        warning "Bash completion not found"
+        print_warn "Bash completion not found"
     fi
 }
 
-# Uninstall zsh completion
 uninstall_zsh_completion() {
     local completion_dirs=(
         "/usr/local/share/zsh/site-functions/_${CLI_NAME}"
@@ -101,27 +114,27 @@ uninstall_zsh_completion() {
             if [[ -w "$dir" ]]; then
                 rm -f "$completion_file"
             else
-                info "Need sudo to remove completion from $(dirname $completion_file)..."
+                print_info "Need sudo to remove completion from $(dirname $completion_file)"
                 sudo rm -f "$completion_file"
             fi
 
-            success "Zsh completion removed from $completion_file"
+            print_success "Zsh completion removed from $completion_file"
         fi
     done
 
-    # Check if fpath was modified in .zshrc
-    local zshrc="$HOME/.zshrc"
-    if [[ -f "$zshrc" ]] && grep -q "# Added by sidoc-cli installer" "$zshrc"; then
-        warning "Found sidoc-cli installer entries in $zshrc"
-        info "You may want to manually remove the fpath additions from $zshrc"
-    fi
+    local zsh_configs=("$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.zprofile")
+    for config_file in "${zsh_configs[@]}"; do
+        if [[ -f "$config_file" ]] && grep -q "# Added by sidoc-cli installer" "$config_file"; then
+            print_warn "Found sidoc-cli installer entries in $config_file"
+            print_info "You may want to manually remove the fpath additions from $config_file"
+        fi
+    done
 
     if [[ "$found" == false ]]; then
-        warning "Zsh completion not found"
+        print_warn "Zsh completion not found"
     fi
 }
 
-# Uninstall fish completion
 uninstall_fish_completion() {
     local completion_dirs=(
         "/usr/share/fish/vendor_completions.d/${CLI_NAME}.fish"
@@ -137,51 +150,45 @@ uninstall_fish_completion() {
             if [[ -w "$dir" ]]; then
                 rm -f "$completion_file"
             else
-                info "Need sudo to remove completion from $(dirname $completion_file)..."
+                print_info "Need sudo to remove completion from $(dirname $completion_file)"
                 sudo rm -f "$completion_file"
             fi
 
-            success "Fish completion removed from $completion_file"
+            print_success "Fish completion removed from $completion_file"
         fi
     done
 
     if [[ "$found" == false ]]; then
-        warning "Fish completion not found"
+        print_warn "Fish completion not found"
     fi
 }
 
-# Show usage
-show_usage() {
-    cat << EOF
-sidoc-cli Uninstaller
-
-Usage: $0 [OPTIONS]
-
-Options:
-    --bash-only     Remove bash completion only
-    --zsh-only      Remove zsh completion only
-    --fish-only     Remove fish completion only
-    --completions   Remove all completions only (keep CLI)
-    --help          Show this help message
-
-Environment Variables:
-    INSTALL_DIR     Directory where the CLI binary is installed (default: /usr/local/bin)
-
-Examples:
-    $0                  # Complete uninstall (CLI + all completions)
-    $0 --completions    # Remove all completions only
-    $0 --bash-only      # Remove bash completion only
-EOF
+show_help() {
+    echo -e "${BOLD}Usage:${RESET}"
+    echo -e "  $0 [options]"
+    echo
+    echo -e "${BOLD}Options:${RESET}"
+    echo -e "  ${GREEN}--bash-only${RESET}     Remove bash completion only"
+    echo -e "  ${GREEN}--zsh-only${RESET}      Remove zsh completion only"
+    echo -e "  ${GREEN}--fish-only${RESET}     Remove fish completion only"
+    echo -e "  ${GREEN}--completions${RESET}   Remove all completions only (keep CLI)"
+    echo -e "  ${GREEN}--help${RESET}          Show this help message"
+    echo
+    echo -e "${BOLD}Environment Variables:${RESET}"
+    echo -e "  ${CYAN}INSTALL_DIR${RESET}     Directory where the CLI binary is installed (default: /usr/local/bin)"
+    echo
+    echo -e "${BOLD}Examples:${RESET}"
+    echo -e "  $0                  ${DIM}# Complete uninstall (CLI + all completions)${RESET}"
+    echo -e "  $0 --completions    ${DIM}# Remove all completions only${RESET}"
+    echo -e "  $0 --bash-only      ${DIM}# Remove bash completion only${RESET}"
 }
 
-# Main uninstallation
 main() {
     local remove_cli=true
     local remove_bash=true
     local remove_zsh=true
     local remove_fish=true
 
-    # Parse arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --bash-only)
@@ -207,45 +214,42 @@ main() {
                 shift
                 ;;
             --help|-h)
-                show_usage
+                show_help
                 exit 0
                 ;;
             *)
-                error "Unknown option: $1. Use --help for usage."
+                print_error "Unknown option: $1. Use --help for usage."
                 ;;
         esac
     done
 
-    echo ""
-    echo "╔════════════════════════════════════╗"
-    echo "║   SIDOC CLI Uninstaller            ║"
-    echo "╚════════════════════════════════════╝"
-    echo ""
+    print_header
 
-    # Uninstall CLI
     if [[ "$remove_cli" == true ]]; then
         uninstall_cli || true
-        echo ""
     fi
 
-    # Uninstall completions
     if [[ "$remove_bash" == true ]]; then
+        print_step "Removing bash completion"
         uninstall_bash_completion
-        echo ""
+        echo
     fi
 
     if [[ "$remove_zsh" == true ]]; then
+        print_step "Removing zsh completion"
         uninstall_zsh_completion
-        echo ""
+        echo
     fi
 
     if [[ "$remove_fish" == true ]]; then
+        print_step "Removing fish completion"
         uninstall_fish_completion
-        echo ""
+        echo
     fi
 
-    success "Uninstallation complete!"
-    echo ""
+    echo -e "${BOLD}═══════════════════════════════════${RESET}"
+    echo -e "${CHECK} ${BOLD}Uninstallation complete!${RESET}"
+    echo
 }
 
 main "$@"
