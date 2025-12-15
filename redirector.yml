@@ -1,0 +1,83 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: outlinewiki-redirector
+  namespace: svc0070t-wikis
+spec:
+  selector:
+    app: outlinewiki-redirector
+  ports:
+    - port: 80
+      targetPort: 8080
+      name: http-port
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  namespace: svc0070t-wikis
+  name: outlinewiki-redirector
+  labels:
+    app: outlinewiki-redirector
+    route: private
+spec:
+  host: collab-test.epfl.ch
+  to:
+    kind: Service
+    name: outlinewiki-redirector
+    weight: 100
+  port:
+    targetPort: http-port
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: svc0070t-wikis
+  name: outlinewiki-redirector
+spec:
+  selector:
+    matchLabels:
+      app: outlinewiki-redirector
+  template:
+    metadata:
+      labels:
+        app: outlinewiki-redirector
+    spec:
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: apache-logs
+          emptyDir: {}
+      containers:
+        - name: outlinewiki-redirector
+          image: quay-its.epfl.ch/svc0070/web-redirect:3.2.1
+          resources:
+            limits:
+              memory: "100Mi"
+            requests:
+              cpu: "10m"
+              memory: "100Mi"
+          ports:
+            - containerPort: 8080
+          env:
+            - name: REDIRECT_URL
+              value: "https://sidoc-test.epfl.ch"
+            - name: PORT
+              value: "8080"
+            - name: SERVER_NAME
+              value: "localhost"
+            - name: REDIRECT_CODE
+              value: "301"
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp/apache
+            - name: apache-logs
+              mountPath: /usr/local/apache2/logs
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+      imagePullSecrets:
+        - name: svc0070-pull-secret
