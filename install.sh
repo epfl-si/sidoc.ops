@@ -179,10 +179,24 @@ install_zsh_completion() {
         mkdir -p "$target_dir"
 
         # Add to fpath if not already there (must be BEFORE compinit)
-        local zshrc="$HOME/.zshrc"
-        if [[ -f "$zshrc" ]] && ! grep -q "sidoc-cli installer" "$zshrc"; then
+        # Try different zsh config files in order of preference
+        local zsh_config=""
+        for config_file in "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.zprofile"; do
+            if [[ -f "$config_file" ]]; then
+                zsh_config="$config_file"
+                break
+            fi
+        done
+
+        # If no config file exists, create .zshrc
+        if [[ -z "$zsh_config" ]]; then
+            zsh_config="$HOME/.zshrc"
+            touch "$zsh_config"
+        fi
+
+        if ! grep -q "sidoc-cli installer" "$zsh_config"; then
             # Find if there's already a compinit call
-            if grep -q "autoload.*compinit" "$zshrc"; then
+            if grep -q "autoload.*compinit" "$zsh_config"; then
                 # Insert fpath before the compinit line
                 local temp_file=$(mktemp)
                 awk -v dir="$target_dir" '
@@ -193,16 +207,16 @@ install_zsh_completion() {
                         inserted=1
                     }
                     {print}
-                ' "$zshrc" > "$temp_file"
-                mv "$temp_file" "$zshrc"
-                info "Added $target_dir to fpath before compinit in $zshrc"
+                ' "$zsh_config" > "$temp_file"
+                mv "$temp_file" "$zsh_config"
+                info "Added $target_dir to fpath before compinit in $zsh_config"
             else
                 # No compinit found, add both
-                echo "" >> "$zshrc"
-                echo "# Added by sidoc-cli installer" >> "$zshrc"
-                echo "fpath=($target_dir \$fpath)" >> "$zshrc"
-                echo "autoload -Uz compinit && compinit" >> "$zshrc"
-                info "Added $target_dir to fpath and compinit in $zshrc"
+                echo "" >> "$zsh_config"
+                echo "# Added by sidoc-cli installer" >> "$zsh_config"
+                echo "fpath=($target_dir \$fpath)" >> "$zsh_config"
+                echo "autoload -Uz compinit && compinit" >> "$zsh_config"
+                info "Added $target_dir to fpath and compinit in $zsh_config"
             fi
         fi
     fi
@@ -340,7 +354,7 @@ main() {
 
     echo ""
     echo "╔════════════════════════════════════╗"
-    echo "║   SIDOC CLI Installer              ║"
+    echo "║        SIDOC CLI Installer         ║"
     echo "╚════════════════════════════════════╝"
     echo ""
 
