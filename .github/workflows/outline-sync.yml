@@ -9,7 +9,7 @@ on:
 env:
     PATH_TO_PACKAGE: 'scripts/sync'
     APP_NAME: 'outlinewiki-sync'
-    REPOSITORY: 'quay-its.epfl.ch/svc0070'
+    REPOSITORY: 'quay-its.epfl.ch/svc1755'
 jobs:
     get-version:
         name: Get Version

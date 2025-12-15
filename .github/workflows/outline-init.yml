@@ -9,7 +9,7 @@ on:
 env:
     PATH_TO_PACKAGE: 'scripts/init'
     APP_NAME: 'outlinewiki-init'
-    REPOSITORY: 'quay-its.epfl.ch/svc0070'
+    REPOSITORY: 'quay-its.epfl.ch/svc1755'
 jobs:
     get-version:
         name: Get Version
