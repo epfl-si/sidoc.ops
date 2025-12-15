@@ -5,10 +5,10 @@ on:
             - main
         paths:
             - scripts/init/**
-            - .github/outline-init.yml
+            - .github/init.yml
 env:
     PATH_TO_PACKAGE: 'scripts/init'
-    APP_NAME: 'outlinewiki-init'
+    APP_NAME: 'init'
     REPOSITORY: 'quay-its.epfl.ch/svc1755'
 jobs:
     get-version:

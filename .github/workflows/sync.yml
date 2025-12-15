@@ -5,10 +5,10 @@ on:
             - main
         paths:
             - scripts/sync/**
-            - .github/outline-sync.yml
+            - .github/sync.yml
 env:
     PATH_TO_PACKAGE: 'scripts/sync'
-    APP_NAME: 'outlinewiki-sync'
+    APP_NAME: 'sync'
     REPOSITORY: 'quay-its.epfl.ch/svc1755'
 jobs:
     get-version:
