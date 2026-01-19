@@ -34,8 +34,8 @@ class ApiKeySetup {
 		// Get database configuration from environment variables
 		this.dbHost = process.env.DB_HOST || 'localhost';
 		this.dbPort = process.env.DB_PORT || 5432;
-		this.dbName = process.env.DB_NAME || 'outlinewiki-db';
-		this.dbUser = process.env.DB_USER || 'outlinewiki-user';
+		this.dbName = process.env.DB_NAME || 'outline';
+		this.dbUser = process.env.DB_USER || 'outline-user';
 		this.dbPassword = process.env.DB_PASSWORD;
 
 		// Admin configuration
@@ -46,11 +46,11 @@ class ApiKeySetup {
 		this.defaultKeyExpiration = process.env.API_KEY_EXPIRATION || '2029-06-30T21:59:59.999Z';
 
 		// Admin API key config
-		this.adminSecretName = process.env.ADMIN_SECRET_NAME || 'outlinewiki-api-key-admin';
+		this.adminSecretName = process.env.ADMIN_SECRET_NAME || 'outline-api-key-admin';
 		this.adminKeyName = 'admin-api-key';
 
 		// Monitoring API key config
-		this.monitoringSecretName = process.env.MONITORING_SECRET_NAME || 'outlinewiki-api-key-monitoring';
+		this.monitoringSecretName = process.env.MONITORING_SECRET_NAME || 'outline-api-key-monitoring';
 		this.monitoringKeyName = 'monitoring-api-key';
 
 		// Auto-detect namespace or use provided value
