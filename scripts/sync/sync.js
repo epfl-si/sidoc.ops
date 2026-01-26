@@ -267,6 +267,106 @@ class OutlineSync {
 	}
 
 	/**
+	 * Get users with sidoc.readwrite authorization from EPFL API
+	 * @returns {Array} - List of authorizations
+	 */
+	async getAuthorizedUsers() {
+		try {
+			const response = await this.epflClient.get('/authorizations', {
+				params: { authid: 'sidoc.readwrite', type: 'right' },
+			});
+			const authorizations = response.data.authorizations || [];
+
+			logger.debug('Retrieved authorized users', { count: authorizations.length });
+			return authorizations;
+		} catch (error) {
+			logger.error('Failed to retrieve authorized users from EPFL API', { error: error.message });
+			throw error;
+		}
+	}
+
+	/**
+	 * Get members of an EPFL group
+	 * @param {String} groupName - EPFL group name
+	 * @returns {Array} - List of member SCIPERs
+	 */
+	async getEpflGroupMembers(groupName) {
+		try {
+			const response = await this.epflClient.get(`/groups/${groupName}/members`);
+			const members = response.data.members || [];
+			const scipers = members.filter((m) => m.type === 'person').map((m) => m.id);
+			logger.debug('Retrieved EPFL group members', { groupName, count: scipers.length });
+			return scipers;
+		} catch (error) {
+			logger.error(`Failed to get members of EPFL group ${groupName}`, { error: error.message });
+			throw error;
+		}
+	}
+
+	/**
+	 * Add users to an EPFL group (only those not already members)
+	 * @param {Array} scipers - List of SCIPERs
+	 * @param {String} groupName - EPFL group name
+	 * @returns {Boolean} - Success status
+	 */
+	async addUsersToEpflGroup(scipers, groupName) {
+		if (!scipers.length) {
+			logger.debug('No users to add to EPFL group', { groupName });
+			return true;
+		}
+
+		try {
+			await this.epflClient.post(`/groups/${groupName}/members`, {
+				ids: scipers.join(','),
+			});
+			logger.info('Users added to EPFL group', {
+				groupName,
+				count: scipers.length,
+			});
+			return true;
+		} catch (error) {
+			logger.error(`Failed to add users to EPFL group ${groupName}`, { error: error.message });
+			throw error;
+		}
+	}
+
+	/**
+	 * Remove a user from an EPFL group
+	 * @param {Number} sciper - User SCIPER
+	 * @param {String} groupName - EPFL group name
+	 * @returns {Boolean} - Success status
+	 */
+	async removeUserFromEpflGroup(sciper, groupName) {
+		try {
+			await this.epflClient.delete(`/groups/${groupName}/members/${sciper}`);
+			logger.info('User removed from EPFL group', { sciper, groupName });
+			return true;
+		} catch (error) {
+			logger.error(`Failed to remove user ${sciper} from EPFL group ${groupName}`, { error: error.message });
+			throw error;
+		}
+	}
+
+	/**
+	 * Get person info by SCIPER from EPFL API
+	 * @param {Number} sciper - User SCIPER
+	 * @returns {Object|null} - Person data or null if not found
+	 */
+	async getPersonBySciper(sciper) {
+		try {
+			const response = await this.epflClient.get(`/persons/${sciper}`);
+			return response.data;
+		} catch (error) {
+			if (error.response && error.response.status === 404) {
+				logger.warn(`Person with SCIPER ${sciper} not found`, { sciper });
+				return null;
+			}
+			logger.error(`Failed to retrieve person by SCIPER ${sciper}`, { error: error.message });
+			throw error;
+		}
+	}
+
+	/**
 	 * Get all allowed units from configuration file
 	 * @returns {Array} - List of allowed units
 	 */
@@ -508,14 +608,14 @@ class OutlineSync {
 	 * Add a user to a group
 	 * @param {String} userId - User ID
 	 * @param {String} groupId - Group ID
-	 * @returns {Boolean} - Success status
+	 * @returns {Boolean} - true if user was added, false if already in group
 	 */
 	async addUserToGroup(userId, groupId) {
 		try {
 			const isAlreadyInGroup = await this.isUserInGroup(userId, groupId);
 			if (isAlreadyInGroup) {
 				logger.debug('User already in group', { groupId, userId });
-				return true;
+				return false;
 			}
 
 			await this.outlineClient.post('/api/groups.add_user', { id: groupId, userId });
@@ -875,17 +975,32 @@ class OutlineSync {
 			}
 
 			if (!validGroupNames.has(groupNameLower)) {
-				await this.deleteGroup(group.id);
-				logger.info('Obsolete group deleted', { groupName: group.name });
+				// Only delete if the group is empty (no members)
+				const members = await this.getGroupMembers(group.id);
+				if (members.length === 0) {
+					await this.deleteGroup(group.id);
+					logger.info('Obsolete empty group deleted', { groupName: group.name });
+				} else {
+					logger.debug('Group not deleted - still has members', {
+						groupName: group.name,
+						memberCount: members.length,
+					});
+				}
 			}
 		}
 
 		for (const group of existingGroups) {
 			const groupName = group.name;
+			const groupNameLower = groupName.toLowerCase();
+
+			// Skip groups that were deleted in the previous step
+			if (groupNameLower !== this.ADMIN_GROUP_NAME.toLowerCase() && !validGroupNames.has(groupNameLower)) {
+				continue;
+			}
 
 			const groupMembers = await this.getGroupMembers(group.id);
 
-			if (groupName.toLowerCase() === this.ADMIN_GROUP_NAME.toLowerCase()) {
+			if (groupNameLower === this.ADMIN_GROUP_NAME.toLowerCase()) {
 				for (const member of groupMembers) {
 					const user = await this.findUserById(member.id);
 					const isAdmin = admins.some((admin) => admin.email === user.email);
@@ -899,7 +1014,7 @@ class OutlineSync {
 					if (!user) continue;
 
 					const memberUnits = userUnitsMap[user.email] || [];
-					const shouldBeInGroup = memberUnits.some((unit) => unit.name.toLowerCase() === groupName.toLowerCase());
+					const shouldBeInGroup = memberUnits.some((unit) => unit.name.toLowerCase() === groupNameLower);
 
 					if (!shouldBeInGroup) {
 						logger.debug('Removing user from obsolete group', {
@@ -913,6 +1028,123 @@ class OutlineSync {
 		}
 
 		logger.info('User synchronization completed successfully');
+	}
+
+	/**
+	 * Synchronize users with sidoc.readwrite authorization
+	 * - Adds them to the EPFL sidoc-acces group
+	 * - Adds them to their corresponding Outline unit groups
+	 */
+	async syncAuthorizedUsers() {
+		const allowedUnits = await this.getAllowedUnits();
+		const authorizations = await this.getAuthorizedUsers();
+
+		logger.info('Starting authorized users synchronization', {
+			totalAuthorizations: authorizations.length,
+		});
+
+		// Filter by allowed units
+		const validAuths = authorizations.filter((auth) => {
+			const unitName = auth.reason?.resource?.name;
+			return unitName && this.isUnitAllowed({ name: unitName }, allowedUnits);
+		});
+
+		logger.info('Filtered authorizations by allowed units', {
+			totalAuthorizations: authorizations.length,
+			validAuthorizations: validAuths.length,
+		});
+
+		// Group by unit for Outline group assignment
+		const usersByUnit = {};
+		const allScipers = [];
+
+		for (const auth of validAuths) {
+			const unitName = auth.reason.resource.name;
+			const sciper = auth.persid;
+
+			if (!usersByUnit[unitName]) {
+				usersByUnit[unitName] = [];
+			}
+			usersByUnit[unitName].push(sciper);
+			allScipers.push(sciper);
+		}
+
+		// Sync users with EPFL sidoc-acces group
+		const externalsGroup = process.env.EPFL_EXTERNALS_GROUP;
+		if (externalsGroup) {
+			const uniqueScipers = [...new Set(allScipers.map(Number))];
+			const existingMembers = (await this.getEpflGroupMembers(externalsGroup)).map(Number);
+			const scipersToAdd = uniqueScipers.filter((s) => !existingMembers.includes(s));
+			const scipersToRemove = existingMembers.filter((s) => !uniqueScipers.includes(s));
+
+			logger.info('Syncing EPFL externals group', {
+				groupName: externalsGroup,
+				existingMembers: existingMembers.length,
+				authorizedUsers: uniqueScipers.length,
+				toAdd: scipersToAdd,
+				toRemove: scipersToRemove,
+			});
+
+			// Add new users
+			if (scipersToAdd.length > 0) {
+				await this.addUsersToEpflGroup(scipersToAdd, externalsGroup);
+			}
+
+			// Remove users who no longer have the right
+			for (const sciper of scipersToRemove) {
+				await this.removeUserFromEpflGroup(sciper, externalsGroup);
+			}
+		}
+
+		// Add users to Outline groups (only if they exist in Outline)
+		for (const [unitName, scipers] of Object.entries(usersByUnit)) {
+			// First, collect all Outline users for this unit
+			const outlineUsersToAdd = [];
+			for (const sciper of scipers) {
+				const person = await this.getPersonBySciper(sciper);
+				if (!person || !person.email) {
+					logger.warn('Could not retrieve email for authorized user', { sciper });
+					continue;
+				}
+
+				const user = await this.findUserByEmail(person.email);
+				if (user) {
+					outlineUsersToAdd.push({ user, email: person.email });
+				} else {
+					logger.debug('Authorized user not found in Outline', {
+						email: person.email,
+						sciper,
+					});
+				}
+			}
+
+			// Only create/get group if there are users to add
+			if (outlineUsersToAdd.length === 0) {
+				logger.debug('No Outline users found for unit, skipping group creation', { unitName });
+				continue;
+			}
+
+			let group = await this.findGroupByName(unitName);
+			if (!group) {
+				group = await this.createGroup(unitName);
+			}
+
+			// Add users to the group
+			for (const { user, email } of outlineUsersToAdd) {
+				const wasAdded = await this.addUserToGroup(user.id, group.id);
+				if (wasAdded) {
+					logger.info('Authorized user added to Outline group', {
+						email,
+						groupName: unitName,
+					});
+				}
+			}
+		}
+
+		logger.info('Authorized users synchronization completed successfully', {
+			unitsProcessed: Object.keys(usersByUnit).length,
+			totalUsersProcessed: allScipers.length,
+		});
 	}
 
 	/**
@@ -1049,6 +1281,9 @@ async function main() {
 
 		logger.info('Starting user synchronization process');
 		await outlineSync.syncUsers();
+
+		logger.info('Starting authorized users synchronization process');
+		await outlineSync.syncAuthorizedUsers();
 
 		logger.info('Starting admin synchronization process');
 		await outlineSync.syncAdmins();
