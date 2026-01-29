@@ -1,13 +1,24 @@
-- name: cluster
+---
+- name: Deploy PostgreSQL
   hosts: all
   roles:
-      - role: roles/cluster
-  tags:
-      - cluster
+    - postgres
+  tags: [postgres]
 
-- name: outline
+- name: Deploy Redis
   hosts: all
   roles:
-      - role: roles/outline
-  tags:
-      - outline
+    - redis
+  tags: [redis]
+
+- name: Deploy monitoring
+  hosts: all
+  roles:
+    - monitoring
+  tags: [monitoring]
+
+- name: Deploy Outline
+  hosts: all
+  roles:
+    - outline
+  tags: [outline]
