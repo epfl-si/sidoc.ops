@@ -1,72 +1,35 @@
-- name: Include variable files
-  include_vars: "{{ item }}"
-  loop:
-    - config.yml
-    - units.yml
-    - postgres.yml
-    - resources.yml
-  tags:
-    - always
-
-- name: Generate or Retrieve Secrets
-  include_tasks:
+---
+- name: Deploy secrets
+  ansible.builtin.include_tasks:
     file: secrets.yml
     apply:
-      tags:
-        - outline.secrets
-  tags:
-    - outline.secrets
+      tags: [outline.secrets]
+  tags: [outline.secrets]
 
-- name: Deploy PostgreSQL
-  include_tasks:
-    file: postgres.yml
-    apply:
-      tags:
-        - outline.postgres
-  tags:
-    - outline.postgres
-
-- name: Deploy Redis
-  include_tasks:
-    file: redis.yml
-    apply:
-      tags:
-        - outline.redis
-  tags:
-    - outline.redis
-
-- name: Deploy monitoring
-  include_tasks:
-    file: monitoring.yml
-    apply:
-      tags:
-        - outline.monitoring
-  tags:
-    - outline.monitoring
-
-- name: Deploy Web Application
-  include_tasks:
+- name: Deploy web application
+  ansible.builtin.include_tasks:
     file: web.yml
     apply:
-      tags:
-        - outline.web
-  tags:
-    - outline.web
+      tags: [outline.web]
+  tags: [outline.web]
 
-- name: Deploy the init job
-  include_tasks:
+- name: Deploy collaboration service
+  ansible.builtin.include_tasks:
+    file: collaboration.yml
+    apply:
+      tags: [outline.collaboration]
+  tags: [outline.collaboration]
+
+- name: Deploy init job
+  ansible.builtin.include_tasks:
     file: init.yml
     apply:
-      tags:
-        - outline.init
-  tags:
-    - outline.init
+      tags: [outline.init]
+  tags: [outline.init]
 
-- name: Deploy the syncer
-  include_tasks:
-    file: syncer.yml
+- name: Deploy syncer
+  ansible.builtin.include_tasks:
+    file: sync.yml
     apply:
-      tags:
-        - outline.syncer
-  tags:
-    - outline.syncer
+      tags: [outline.sync]
+  tags: [outline.sync]

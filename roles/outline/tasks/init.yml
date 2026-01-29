@@ -1,27 +1,52 @@
+---
+- name: Check if API keys already exist
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    namespace: "{{ inventory_hostname }}"
+    name: "{{ app.name }}-api-key-{{ item }}"
+  register: keys_status
+  loop: [admin, monitoring]
+
 - name: Create empty API key secrets
   kubernetes.core.k8s:
-    state: present
     definition:
       apiVersion: v1
       kind: Secret
       metadata:
         name: "{{ app.name }}-api-key-{{ item }}"
-        namespace: "{{ openshift_namespace }}"
+        namespace: "{{ inventory_hostname }}"
+        labels:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: init
       type: Opaque
       data: {}
-  loop:
-    - admin
-    - monitoring
+  loop: [admin, monitoring]
+  when: keys_status.results[loop.index0].resources | length == 0
 
-- name: Create init job role
+- name: Create init job ServiceAccount
   kubernetes.core.k8s:
-    state: present
+    definition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: "{{ app.name }}-init-sa"
+        namespace: "{{ inventory_hostname }}"
+        labels:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: init
+
+- name: Create init job Role
+  kubernetes.core.k8s:
     definition:
       apiVersion: rbac.authorization.k8s.io/v1
       kind: Role
       metadata:
         name: "{{ app.name }}-init-secret-writer"
-        namespace: "{{ openshift_namespace }}"
+        namespace: "{{ inventory_hostname }}"
+        labels:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: init
       rules:
         - apiGroups: [""]
           resources: ["secrets"]
@@ -33,29 +58,21 @@
             - "{{ app.name }}-api-key-monitoring"
           verbs: ["update", "get"]
 
-- name: Create init job service account
+- name: Create init job RoleBinding
   kubernetes.core.k8s:
-    state: present
-    definition:
-      apiVersion: v1
-      kind: ServiceAccount
-      metadata:
-        name: "{{ app.name }}-init-sa"
-        namespace: "{{ openshift_namespace }}"
-
-- name: Bind init role to service account
-  kubernetes.core.k8s:
-    state: present
     definition:
       apiVersion: rbac.authorization.k8s.io/v1
       kind: RoleBinding
       metadata:
         name: "{{ app.name }}-init-binding"
-        namespace: "{{ openshift_namespace }}"
+        namespace: "{{ inventory_hostname }}"
+        labels:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: init
       subjects:
         - kind: ServiceAccount
           name: "{{ app.name }}-init-sa"
-          namespace: "{{ openshift_namespace }}"
+          namespace: "{{ inventory_hostname }}"
       roleRef:
         kind: Role
         name: "{{ app.name }}-init-secret-writer"
@@ -66,41 +83,42 @@
     api_version: batch/v1
     kind: Job
     name: "{{ app.name }}-init-job"
-    namespace: "{{ openshift_namespace }}"
+    namespace: "{{ inventory_hostname }}"
   register: init_job_status
 
 - name: Delete existing init job
   kubernetes.core.k8s:
     state: absent
-    definition:
-      apiVersion: batch/v1
-      kind: Job
-      metadata:
-        name: "{{ app.name }}-init-job"
-        namespace: "{{ openshift_namespace }}"
+    api_version: batch/v1
+    kind: Job
+    name: "{{ app.name }}-init-job"
+    namespace: "{{ inventory_hostname }}"
   when: init_job_status.resources | length > 0
 
-- name: Create initialization job
+- name: Create init Job
   kubernetes.core.k8s:
-    state: present
     definition:
       apiVersion: batch/v1
       kind: Job
       metadata:
         name: "{{ app.name }}-init-job"
-        namespace: "{{ openshift_namespace }}"
+        namespace: "{{ inventory_hostname }}"
+        labels:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: init
       spec:
-        backoffLimit: "{{ init.backoff_limit }}"
-        activeDeadlineSeconds: "{{ init.job_timeout }}"
+        backoffLimit: 3
+        activeDeadlineSeconds: 600
         template:
           metadata:
             labels:
-              app: "{{ app.name }}"
-              component: init
+              app.kubernetes.io/name: "{{ app.name }}"
+              app.kubernetes.io/component: init
           spec:
+            serviceAccountName: "{{ app.name }}-init-sa"
             containers:
               - name: init
-                image: "{{ registry.url }}/{{ registry.organization }}/{{ app.name }}-init:{{ init.image_version }}"
+                image: "{{ registry }}/init:{{ images.init.version }}"
                 env:
                   - name: DB_PASSWORD
                     valueFrom:
@@ -109,21 +127,24 @@
                         key: password
                   - name: DB_HOST
                     value: "{{ database.host }}"
+                  - name: DB_NAME
+                    value: "{{ database.name }}"
+                  - name: DB_USER
+                    value: "{{ database.user }}"
                   - name: OUTLINE_ADMIN_EMAIL
-                    value: "{{ init.admin_email }}"
+                    value: admin@epfl.ch
                   - name: OUTLINE_ADMIN_NAME
-                    value: "{{ init.admin_name }}"
+                    value: EPFL Admin
                   - name: ADMIN_SECRET_NAME
                     value: "{{ app.name }}-api-key-admin"
                   - name: MONITORING_SECRET_NAME
                     value: "{{ app.name }}-api-key-monitoring"
                 resources:
                   requests:
-                    cpu: "{{ current_resources.init.requests.cpu }}"
-                    memory: "{{ current_resources.init.requests.memory }}"
+                    cpu: "{{ resources.init.requests.cpu }}"
+                    memory: "{{ resources.init.requests.memory }}"
                   limits:
-                    memory: "{{ current_resources.init.limits.memory }}"
+                    memory: "{{ resources.init.limits.memory }}"
             restartPolicy: OnFailure
-            serviceAccountName: "{{ app.name }}-init-sa"
             imagePullSecrets:
-              - name: "{{ pull_secret_name }}"
+              - name: "{{ pull_secret }}"

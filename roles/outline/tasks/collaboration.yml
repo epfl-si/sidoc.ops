@@ -1,78 +1,63 @@
 ---
-- name: Create uploads PVC
-  kubernetes.core.k8s:
-    definition:
-      apiVersion: v1
-      kind: PersistentVolumeClaim
-      metadata:
-        name: "{{ app.name }}-uploads"
-        namespace: "{{ inventory_hostname }}"
-        labels:
-          app.kubernetes.io/name: "{{ app.name }}"
-          app.kubernetes.io/component: web
-      spec:
-        accessModes: [ReadWriteMany]
-        storageClassName: "{{ storage_class.name }}"
-        resources:
-          requests:
-            storage: "{{ resources.web.storage }}"
-
-- name: Create web Service
+- name: Create collaboration Service
   kubernetes.core.k8s:
     definition:
       apiVersion: v1
       kind: Service
       metadata:
-        name: "{{ app.name }}-web"
+        name: "{{ app.name }}-collaboration"
         namespace: "{{ inventory_hostname }}"
         labels:
           app.kubernetes.io/name: "{{ app.name }}"
-          app.kubernetes.io/component: web
+          app.kubernetes.io/component: collaboration
       spec:
         selector:
           app.kubernetes.io/name: "{{ app.name }}"
-          app.kubernetes.io/component: web
+          app.kubernetes.io/component: collaboration
         ports:
           - name: http
             port: 80
             targetPort: 3000
 
-- name: Create web Route
+- name: Create collaboration Route
   kubernetes.core.k8s:
     definition:
       apiVersion: route.openshift.io/v1
       kind: Route
       metadata:
-        name: "{{ app.name }}-web"
+        name: "{{ app.name }}-collaboration"
         namespace: "{{ inventory_hostname }}"
         labels:
           app.kubernetes.io/name: "{{ app.name }}"
-          app.kubernetes.io/component: web
+          app.kubernetes.io/component: collaboration
           route: private
+        annotations:
+          route.openshift.io/timeout: 3600s
       spec:
         host: "{{ app.domain }}"
+        path: /collaboration
         to:
           kind: Service
-          name: "{{ app.name }}-web"
+          name: "{{ app.name }}-collaboration"
         port:
           targetPort: http
         tls:
           termination: edge
           insecureEdgeTerminationPolicy: Redirect
 
-- name: Deploy web application
+- name: Deploy collaboration service
   kubernetes.core.k8s:
     definition:
       apiVersion: apps/v1
       kind: Deployment
       metadata:
-        name: "{{ app.name }}-web"
+        name: "{{ app.name }}-collaboration"
         namespace: "{{ inventory_hostname }}"
         labels:
           app.kubernetes.io/name: "{{ app.name }}"
-          app.kubernetes.io/component: web
+          app.kubernetes.io/component: collaboration
       spec:
-        replicas: "{{ resources.web.replicas }}"
+        replicas: 1
         strategy:
           type: RollingUpdate
           rollingUpdate:
@@ -81,15 +66,15 @@
         selector:
           matchLabels:
             app.kubernetes.io/name: "{{ app.name }}"
-            app.kubernetes.io/component: web
+            app.kubernetes.io/component: collaboration
         template:
           metadata:
             labels:
               app.kubernetes.io/name: "{{ app.name }}"
-              app.kubernetes.io/component: web
+              app.kubernetes.io/component: collaboration
           spec:
             containers:
-              - name: web
+              - name: collaboration
                 image: "{{ registry }}/outline:{{ images.web.version }}"
                 imagePullPolicy: Always
                 ports:
@@ -99,21 +84,19 @@
                     value: /tmp/.yarn-cache
                   - name: URL
                     value: "{{ app.url }}"
-                  - name: COLLABORATION_URL
-                    value: "wss://{{ app.domain }}/collaboration"
                   - name: WEB_CONCURRENCY
                     value: "1"
-                  - name: SERVICES
-                    value: web,websockets,worker
                 envFrom:
                   - secretRef:
                       name: "{{ app.name }}-secrets"
+                command: ["/bin/sh", "-c"]
+                args: ["yarn start --services=collaboration"]
                 resources:
                   requests:
-                    cpu: "{{ resources.web.requests.cpu }}"
-                    memory: "{{ resources.web.requests.memory }}"
+                    cpu: "{{ resources.collaboration.requests.cpu }}"
+                    memory: "{{ resources.collaboration.requests.memory }}"
                   limits:
-                    memory: "{{ resources.web.limits.memory }}"
+                    memory: "{{ resources.collaboration.limits.memory }}"
                 readinessProbe:
                   tcpSocket:
                     port: 3000
@@ -137,47 +120,3 @@
                   claimName: "{{ app.name }}-uploads"
             imagePullSecrets:
               - name: "{{ pull_secret }}"
-
-- name: Create HPA
-  kubernetes.core.k8s:
-    definition:
-      apiVersion: autoscaling/v2
-      kind: HorizontalPodAutoscaler
-      metadata:
-        name: "{{ app.name }}-web-hpa"
-        namespace: "{{ inventory_hostname }}"
-        labels:
-          app.kubernetes.io/name: "{{ app.name }}"
-          app.kubernetes.io/component: web
-      spec:
-        scaleTargetRef:
-          apiVersion: apps/v1
-          kind: Deployment
-          name: "{{ app.name }}-web"
-        minReplicas: 2
-        maxReplicas: 4
-        metrics:
-          - type: Resource
-            resource:
-              name: memory
-              target:
-                type: Utilization
-                averageUtilization: 95
-        behavior:
-          scaleUp:
-            stabilizationWindowSeconds: 60
-            policies:
-              - type: Percent
-                value: 100
-                periodSeconds: 15
-              - type: Pods
-                value: 2
-                periodSeconds: 60
-            selectPolicy: Max
-          scaleDown:
-            stabilizationWindowSeconds: 300
-            policies:
-              - type: Percent
-                value: 10
-                periodSeconds: 60
-            selectPolicy: Min

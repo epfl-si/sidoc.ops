@@ -1,0 +1,91 @@
+---
+- name: Create allowed units ConfigMap
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "{{ app.name }}-allowed-units"
+        namespace: "{{ inventory_hostname }}"
+        labels:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: sync
+      data:
+        allowed-units.json: "{{ allowed_units | to_json }}"
+
+- name: Create sync Secret
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ app.name }}-sync"
+        namespace: "{{ inventory_hostname }}"
+        labels:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: sync
+      type: Opaque
+      stringData:
+        OUTLINE_BASE_URL: "{{ app.url }}"
+        OUTLINE_ADMIN_GROUP: sidoc-admins
+        EPFL_ACCESS_GROUP: sidoc-access
+        EPFL_ALLOWED_UNITS_FILE: /opt/allowed-units.json
+        EPFL_API_URL: "{{ secrets.sync.api.url }}"
+        EPFL_API_PASSWORD: "{{ secrets.sync.api.password }}"
+        EPFL_API_USERNAME: "{{ secrets.sync.api.username }}"
+
+- name: Create sync CronJob
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: batch/v1
+      kind: CronJob
+      metadata:
+        name: "{{ app.name }}-sync-cron"
+        namespace: "{{ inventory_hostname }}"
+        labels:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: sync
+      spec:
+        schedule: "30 * * * *"
+        concurrencyPolicy: Forbid
+        successfulJobsHistoryLimit: 3
+        failedJobsHistoryLimit: 1
+        jobTemplate:
+          spec:
+            template:
+              metadata:
+                labels:
+                  app.kubernetes.io/name: "{{ app.name }}"
+                  app.kubernetes.io/component: sync
+              spec:
+                containers:
+                  - name: sync
+                    image: "{{ registry }}/sync:{{ images.sync.version }}"
+                    imagePullPolicy: Always
+                    envFrom:
+                      - secretRef:
+                          name: "{{ app.name }}-sync"
+                    env:
+                      - name: OUTLINE_API_TOKEN
+                        valueFrom:
+                          secretKeyRef:
+                            name: "{{ app.name }}-api-key-admin"
+                            key: API_KEY
+                    resources:
+                      requests:
+                        cpu: "{{ resources.sync.requests.cpu }}"
+                        memory: "{{ resources.sync.requests.memory }}"
+                      limits:
+                        memory: "{{ resources.sync.limits.memory }}"
+                    volumeMounts:
+                      - name: allowed-units
+                        mountPath: /opt/allowed-units.json
+                        subPath: allowed-units.json
+                        readOnly: true
+                restartPolicy: OnFailure
+                volumes:
+                  - name: allowed-units
+                    configMap:
+                      name: "{{ app.name }}-allowed-units"
+                imagePullSecrets:
+                  - name: "{{ pull_secret }}"
