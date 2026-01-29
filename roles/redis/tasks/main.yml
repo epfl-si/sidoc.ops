@@ -1,0 +1,14 @@
+---
+- name: Deploy storage
+  ansible.builtin.include_tasks:
+    file: storage.yml
+    apply:
+      tags: [redis.storage]
+  tags: [redis.storage]
+
+- name: Deploy app
+  ansible.builtin.include_tasks:
+    file: app.yml
+    apply:
+      tags: [redis.app]
+  tags: [redis.app]
