@@ -1,0 +1,130 @@
+- name: Create PrometheusRules
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: monitoring.coreos.com/v1
+      kind: PrometheusRule
+      metadata:
+        name: "{{ app.name }}-alerts"
+        namespace: "{{ inventory_hostname }}"
+        labels:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: monitoring
+      spec:
+        groups:
+          - name: "{{ app.name }}-sync-alerts"
+            rules:
+              - alert: SidocSyncJobFailed
+                expr: kube_job_failed{namespace="{{ inventory_hostname }}", job_name="{{ app.name }}-sync"} > 0
+                for: 5m
+                labels:
+                  severity: critical
+                annotations:
+                  summary: Sidoc sync job failed
+                  description: The Sidoc sync job has failed. Check logs for details.
+
+              - alert: SidocSyncJobRunningTooLong
+                expr: time() - kube_job_status_start_time{namespace="{{ inventory_hostname }}", job_name="{{ app.name }}-sync"} > 3600
+                for: 5m
+                labels:
+                  severity: critical
+                annotations:
+                  summary: Sidoc sync running too long
+                  description: The Sidoc sync job has been running for more than 1 hour.
+
+          - name: "{{ app.name }}-pod-alerts"
+            rules:
+              - alert: SidocPodRestartingTooOften
+                expr: increase(kube_pod_container_status_restarts_total{namespace="{{ inventory_hostname }}", pod=~"{{ app.name }}-.*", pod!~"{{ app.name }}-(sync|redis|exporter).*"}[30m]) > 3
+                for: 5m
+                labels:
+                  severity: critical
+                annotations:
+                  summary: Sidoc application pod restarting too often
+                  description: The Sidoc application pod has restarted more than 3 times in the last 30 minutes.
+
+              - alert: SidocPodNotReady
+                expr: |
+                  sum by (pod) (kube_pod_status_phase{namespace="{{ inventory_hostname }}", pod=~"{{ app.name }}-[^(sync|redis|exporter)].*", phase=~"Running|Pending"}) > 0
+                  and
+                  sum by (pod) (kube_pod_status_ready{namespace="{{ inventory_hostname }}", pod=~"{{ app.name }}-[^(sync|redis|exporter)].*", condition="true"}) == 0
+                for: 45s
+                labels:
+                  severity: critical
+                annotations:
+                  summary: Sidoc application pod is not ready
+                  description: The Sidoc application pod is running but not ready for more than 45 seconds.
+
+          - name: "{{ app.name }}-redis-alerts"
+            rules:
+              - alert: SidocRedisPodMissing
+                expr: absent(kube_pod_info{namespace="{{ inventory_hostname }}", pod=~"{{ app.name }}-redis-.*"})
+                for: 15s
+                labels:
+                  severity: critical
+                annotations:
+                  summary: Sidoc Redis pod is missing
+                  description: No Redis pod for Sidoc is running for more than 15 seconds.
+
+          - name: "{{ app.name }}-endpoint-alerts"
+            rules:
+              - alert: SidocEndpointDown
+                expr: probe_success{job="{{ app.name }}-probe"} == 0
+                for: 1m
+                labels:
+                  severity: critical
+                annotations:
+                  summary: Sidoc endpoint is down
+                  description: The Sidoc endpoint has been unreachable for over 1 minute.
+
+              - alert: SidocSlowResponse
+                expr: probe_duration_seconds{job="{{ app.name }}-probe"} > 2
+                for: 5m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: Sidoc slow response time
+                  description: The Sidoc endpoint is responding slowly (>2s) for over 5 minutes.
+
+              - alert: SidocSSLCertExpiringSoon
+                expr: probe_ssl_earliest_cert_expiry{job="{{ app.name }}-probe"} - time() < 86400 * 14
+                for: 1h
+                labels:
+                  severity: warning
+                annotations:
+                  summary: Sidoc SSL certificate expiring soon
+                  description: The SSL certificate for Sidoc will expire in less than 14 days.
+
+          - name: "{{ app.name }}-url-alerts"
+            rules:
+              - alert: "SidocURLSlowResponse"
+                expr: >
+                  probe_duration_seconds{service="sidoc"} > 5
+                for: 2m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "Sidoc URL slow response"
+                  description: >-
+                    {% raw %}The Sidoc URL {{ $labels.target_url }} is responding slowly ({{ $value }}s).{% endraw %}
+
+              - alert: "SidocURLCertificateExpiry"
+                expr: >
+                  probe_ssl_earliest_cert_expiry{service="sidoc"} - time() < 86400 * 7
+                for: 1m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "Sidoc SSL certificate expiring soon"
+                  description: >-
+                    {% raw %}SSL certificate for {{ $labels.target_url }} expires in {{ $value | humanizeDuration }}.{% endraw %}
+
+              - alert: "SidocURLUnexpectedStatusCode"
+                expr: >
+                  probe_http_status_code{service="sidoc"} != 200
+                for: 1m
+                labels:
+                  severity: critical
+                annotations:
+                  summary: "Sidoc URL unexpected status code"
+                  description: >-
+                    {% raw %}The Sidoc URL {{ $labels.target_url }} returned invalid status code {{ $value }}.{% endraw %}

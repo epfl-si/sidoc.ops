@@ -1,0 +1,28 @@
+---
+- name: Deploy alert
+  ansible.builtin.include_tasks:
+    file: alert.yml
+    apply:
+      tags: [monitoring.alert]
+  tags: [monitoring.alert]
+
+- name: Deploy exporter
+  ansible.builtin.include_tasks:
+    file: exporter.yml
+    apply:
+      tags: [monitoring.exporter]
+  tags: [monitoring.exporter]
+
+- name: Deploy rules
+  ansible.builtin.include_tasks:
+    file: rules.yml
+    apply:
+      tags: [monitoring.rules]
+  tags: [monitoring.rules]
+
+- name: Deploy blackbox
+  ansible.builtin.include_tasks:
+    file: blackbox.yml
+    apply:
+      tags: [monitoring.blackbox]
+  tags: [monitoring.blackbox]

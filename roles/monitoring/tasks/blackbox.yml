@@ -1,0 +1,155 @@
+---
+- name: Create blackbox config
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: blackbox-config
+        namespace: "{{ inventory_hostname }}"
+        labels:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: blackbox
+      data:
+        config.yml: |
+          modules:
+            http_2xx:
+              prober: http
+              timeout: 5s
+              http:
+                valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+                valid_status_codes: []  # Defaults to 2xx
+                method: GET
+                follow_redirects: true
+                fail_if_ssl: false
+                fail_if_not_ssl: false
+                tls_config:
+                  insecure_skip_verify: false
+                preferred_ip_protocol: "ip4" # defaults to "ip6"
+            http_post_2xx:
+              prober: http
+              timeout: 5s
+              http:
+                method: POST
+                headers:
+                  Content-Type: application/json
+                body: '{}'
+            tcp_connect:
+              prober: tcp
+              timeout: 5s
+            icmp:
+              prober: icmp
+              timeout: 5s
+              icmp:
+                preferred_ip_protocol: "ip4"
+
+- name: Create blackbox Deployment
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: "blackbox"
+        namespace: "{{ inventory_hostname }}"
+        labels:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: blackbox
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: "{{ app.name }}"
+            app.kubernetes.io/component: blackbox
+        template:
+          metadata:
+            labels:
+              app.kubernetes.io/name: "{{ app.name }}"
+              app.kubernetes.io/component: blackbox
+          spec:
+            containers:
+              - name: blackbox
+                image: "{{ registry }}/blackbox:{{ images.blackbox.version }}"
+                args:
+                  - "--config.file=/etc/blackbox_exporter/config.yml"
+                volumeMounts:
+                  - name: config
+                    mountPath: /etc/blackbox_exporter
+                imagePullPolicy: Always
+                ports:
+                  - containerPort: 9115
+                    name: http
+                resources:
+                  requests:
+                    cpu: "{{ resources.blackbox.requests.cpu }}"
+                    memory: "{{ resources.blackbox.requests.memory }}"
+                  limits:
+                    memory: "{{ resources.blackbox.limits.memory }}"
+                readinessProbe:
+                  httpGet:
+                    path: /
+                    port: http
+                livenessProbe:
+                  httpGet:
+                    path: /
+                    port: http
+            imagePullSecrets:
+              - name: "{{ pull_secret }}"
+            volumes:
+              - name: config
+                configMap:
+                  name: blackbox-config
+
+- name: Create blackbox Service
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: "blackbox"
+        namespace: "{{ inventory_hostname }}"
+        labels:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: blackbox
+      spec:
+        selector:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: blackbox
+        ports:
+          - protocol: TCP
+            port: 9115
+            targetPort: http
+
+- name: Create ServiceMonitor
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: monitoring.coreos.com/v1
+      kind: ServiceMonitor
+      metadata:
+        name: "{{ app.name }}-probe"
+        namespace: "{{ inventory_hostname }}"
+        labels:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: blackbox
+      spec:
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: "{{ app.name }}"
+            app.kubernetes.io/component: blackbox
+        endpoints:
+          - interval: 10s
+            params:
+              module:
+                - http_2xx
+              target:
+                - "{{ app.url }}"
+            path: /probe
+            port: http
+            scheme: http
+            relabelings:
+              - action: replace
+                sourceLabels:
+                  - __param_target
+                targetLabel: target_url
+              - action: replace
+                replacement: "{{ app.name }}"
+                targetLabel: service
