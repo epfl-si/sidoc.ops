@@ -1,0 +1,14 @@
+---
+- name: Deploy secrets
+  ansible.builtin.include_tasks:
+    file: secrets.yml
+    apply:
+      tags: [postgres.secrets]
+  tags: [postgres.secrets]
+
+- name: Deploy cluster
+  ansible.builtin.include_tasks:
+    file: cluster.yml
+    apply:
+      tags: [postgres.cluster]
+  tags: [postgres.cluster]

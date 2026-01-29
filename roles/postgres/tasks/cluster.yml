@@ -1,0 +1,89 @@
+---
+- name: Deploy PostgreSQL cluster
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: postgresql.cnpg.io/v1
+      kind: Cluster
+      metadata:
+        name: "{{ database.cluster }}"
+        namespace: "{{ inventory_hostname }}"
+        labels:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: database
+      spec:
+        instances: "{{ resources.database.replicas }}"
+        monitoring:
+          enablePodMonitor: true
+        storage:
+          size: "{{ resources.database.storage }}"
+          storageClass: "{{ storage_class.name }}"
+        enableSuperuserAccess: true
+        resources:
+          requests:
+            cpu: "{{ resources.database.requests.cpu }}"
+            memory: "{{ resources.database.requests.memory }}"
+          limits:
+            memory: "{{ resources.database.limits.memory }}"
+        backup:
+          barmanObjectStore:
+            destinationPath: "s3://{{ secrets.s3.name }}"
+            endpointURL: "https://{{ secrets.s3.host }}"
+            s3Credentials:
+              accessKeyId:
+                name: s3-credentials
+                key: AWS_ACCESS_KEY_ID
+              secretAccessKey:
+                name: s3-credentials
+                key: AWS_SECRET_ACCESS_KEY
+        env:
+          - name: AWS_REQUEST_CHECKSUM_CALCULATION
+            value: WHEN_REQUIRED
+          - name: AWS_RESPONSE_CHECKSUM_VALIDATION
+            value: WHEN_REQUIRED
+        postgresql:
+          parameters:
+            max_connections: "600"
+            max_slot_wal_keep_size: 3GB
+            shared_buffers: 256MB
+        managed:
+          roles:
+            - name: "{{ database.user }}"
+              ensure: present
+              login: true
+              superuser: false
+              passwordSecret:
+                name: "{{ app.name }}-db-credentials"
+
+- name: Create database
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: postgresql.cnpg.io/v1
+      kind: Database
+      metadata:
+        name: "{{ database.name }}"
+        namespace: "{{ inventory_hostname }}"
+        labels:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: database
+      spec:
+        name: "{{ database.name }}"
+        owner: "{{ database.user }}"
+        cluster:
+          name: "{{ database.cluster }}"
+
+- name: Create scheduled backup
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: postgresql.cnpg.io/v1
+      kind: ScheduledBackup
+      metadata:
+        name: "{{ database.cluster }}"
+        namespace: "{{ inventory_hostname }}"
+        labels:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: backup
+      spec:
+        schedule: "0 0 2 * * *"
+        backupOwnerReference: self
+        cluster:
+          name: "{{ database.cluster }}"
