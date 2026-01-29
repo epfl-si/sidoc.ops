@@ -1,9 +1,0 @@
-secrets: "{{ lookup('pipe', 'keybase fs read /keybase/team/epfl_wiki/secrets/outline.yml') | from_yaml }}"
-pull_secret_name: svc0070-pull-secret
-
-app_url: "https://{{ app.subdomain }}{{ '-test' if env == 'test' else '' }}.{{ domain }}"
-collaboration_url: "wss://{{ app.subdomain }}{{ '-test' if env == 'test' else '' }}.{{ domain }}/collaboration"
-redis_url: "redis://{{ app.name }}-redis:{{ redis.port }}"
-database_url: "postgres://{{ app.name }}{{ database.user_suffix }}:{{ database_password }}@{{ database.host }}:5432/{{ app.name }}{{ database.name_suffix }}"
-
-current_resources: "{{ resources[env] }}"

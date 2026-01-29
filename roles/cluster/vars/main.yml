@@ -1,1 +1,0 @@
-secrets: "{{ lookup('file', '/keybase/team/epfl_wiki/secrets/cluster.yml') | from_yaml }}"
