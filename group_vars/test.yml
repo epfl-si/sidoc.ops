@@ -1,0 +1,61 @@
+resources:
+  web:
+    replicas: 1
+    storage: 5Gi
+    requests:
+      cpu: 295m
+      memory: 590Mi
+    limits:
+      memory: 590Mi
+
+  collaboration:
+    requests:
+      cpu: 295m
+      memory: 590Mi
+    limits:
+      memory: 590Mi
+
+  redis:
+    storage: 1Gi
+    requests:
+      cpu: 10m
+      memory: 100Mi
+    limits:
+      memory: 100Mi
+
+  sync:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+  init:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+  exporter:
+    requests:
+      cpu: 5m
+      memory: 16Mi
+    limits:
+      memory: 32Mi
+
+  database:
+    storage: 5Gi
+    replicas: 2
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+  blackbox:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 128Mi

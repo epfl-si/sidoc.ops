@@ -1,0 +1,78 @@
+_secrets_file: "{{ lookup('pipe', 'keybase fs read /keybase/team/epfl_sidoc/secrets.yml') | from_yaml }}"
+secrets: "{{ _secrets_file[env] }}"
+
+app:
+  name: outline
+  display: "Sidoc{{ ' - Test' if env == 'test' else '' }}"
+  domain: "sidoc{{ '-test' if env == 'test' else '' }}.epfl.ch"
+  url: "https://sidoc{{ '-test' if env == 'test' else '' }}.epfl.ch"
+
+registry: quay-its.epfl.ch/svc1755
+pull_secret: svc1755-pull-secret
+
+images:
+  web:
+    version: "0.84.10"
+  init:
+    version: "1.2.1"
+  sync:
+    version: "1.11.1"
+  exporter:
+    version: "1.4.2"
+  redis:
+    version: "8.4.0"
+  blackbox:
+    version: "0.28.0"
+
+database:
+  cluster: outline-postgres
+  name: "{{ app.name }}-db"
+  user: "{{ app.name }}-user"
+  host: "outline-postgres-rw"
+
+storage_class:
+  name: ocs-storagecluster-cephfs
+
+allowed_units:
+  # DSI
+  - DSI-EMP
+  - DSI-GE
+  - INVENTAIRE-CRI
+  - ISAS-FSD
+  - ISAS-GE
+  - ISAS-GIF
+  - ISCS-BA
+  - ISCS-BI
+  - ISCS-ERP
+  - ISCS-GE
+  - ISCS-IAM
+  - ISGOV-BO
+  - ISGOV-GE
+  - ISGOV-ITSEC
+  - ISGOV-PM
+  - ITOP-GE
+  - ITOP-INFR
+  - ITOP-MWS
+  - ITOP-SDDC
+  - ITOP-SDESK
+  - ITOP-WSRV
+  # Library
+  - SISB-AIR
+  - SISB-CUBA
+  - SISB-SOAR
+  - SISB-SPICE
+  - SISB-USEP
+  - VPA-SISB-GE
+  # Centers
+  - C4DT
+  - IMAGING-GE
+  # Mediacom
+  - MEC
+  # IT Faculty Services
+  - CDH-IT
+  - CDM-IT
+  - ENAC-IT
+  - IC-IT
+  - SB-IT
+  - STI-IT
+  - SV-IT
