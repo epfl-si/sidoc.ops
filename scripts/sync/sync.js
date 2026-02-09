@@ -80,7 +80,7 @@ class OutlineSync {
 
 	_initConfig() {
 		this.ADMIN_EMAIL = process.env.OUTLINE_ADMIN_EMAIL || 'admin@epfl.ch';
-		this.ADMIN_GROUP = 'admins';
+		this.ADMIN_GROUP = 'ADMINS';
 		this.ALLOWED_COLLECTIONS = (process.env.ALLOWED_COLLECTIONS || 'welcome').split(',').map((s) => s.toLowerCase());
 		this.ACCESS_GROUP = process.env.EPFL_ACCESS_GROUP;
 	}
