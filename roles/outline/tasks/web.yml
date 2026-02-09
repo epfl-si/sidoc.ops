@@ -181,3 +181,49 @@
                 value: 10
                 periodSeconds: 60
             selectPolicy: Min
+
+- name: Create web VPA
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: autoscaling.k8s.io/v1
+      kind: VerticalPodAutoscaler
+      metadata:
+        name: "{{ app.name }}-web-vpa"
+        namespace: "{{ inventory_hostname }}"
+        labels:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: web
+      spec:
+        targetRef:
+          apiVersion: apps/v1
+          kind: Deployment
+          name: "{{ app.name }}-web"
+        updatePolicy:
+          updateMode: "Auto"
+        resourcePolicy:
+          containerPolicies:
+            - containerName: web
+              minAllowed:
+                cpu: 100m
+                memory: 256Mi
+              maxAllowed:
+                cpu: 2000m
+                memory: 2Gi
+
+- name: Create web PDB
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: "{{ app.name }}-web-pdb"
+        namespace: "{{ inventory_hostname }}"
+        labels:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: web
+      spec:
+        minAvailable: 1
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: "{{ app.name }}"
+            app.kubernetes.io/component: web

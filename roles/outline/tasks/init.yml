@@ -22,7 +22,9 @@
       type: Opaque
       data: {}
   loop: [admin, monitoring]
-  when: keys_status.results[loop.index0].resources | length == 0
+  loop_control:
+    index_var: idx
+  when: keys_status.results[idx].resources | length == 0
 
 - name: Create init job ServiceAccount
   kubernetes.core.k8s:

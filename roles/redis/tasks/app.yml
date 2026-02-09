@@ -62,3 +62,49 @@
                   claimName: "{{ app.name }}-redis-data"
             imagePullSecrets:
               - name: "{{ pull_secret }}"
+
+- name: Create Redis VPA
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: autoscaling.k8s.io/v1
+      kind: VerticalPodAutoscaler
+      metadata:
+        name: "{{ app.name }}-redis-vpa"
+        namespace: "{{ inventory_hostname }}"
+        labels:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: redis
+      spec:
+        targetRef:
+          apiVersion: apps/v1
+          kind: Deployment
+          name: "{{ app.name }}-redis"
+        updatePolicy:
+          updateMode: "Auto"
+        resourcePolicy:
+          containerPolicies:
+            - containerName: redis
+              minAllowed:
+                cpu: 10m
+                memory: 64Mi
+              maxAllowed:
+                cpu: 500m
+                memory: 512Mi
+
+- name: Create Redis PDB
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: "{{ app.name }}-redis-pdb"
+        namespace: "{{ inventory_hostname }}"
+        labels:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: redis
+      spec:
+        minAvailable: 1
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: "{{ app.name }}"
+            app.kubernetes.io/component: redis
