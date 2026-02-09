@@ -78,3 +78,49 @@
             interval: 2m
             path: /metrics
             scrapeTimeout: 25s
+
+- name: Create exporter VPA
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: autoscaling.k8s.io/v1
+      kind: VerticalPodAutoscaler
+      metadata:
+        name: "{{ app.name }}-exporter-vpa"
+        namespace: "{{ inventory_hostname }}"
+        labels:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: exporter
+      spec:
+        targetRef:
+          apiVersion: apps/v1
+          kind: Deployment
+          name: "{{ app.name }}-exporter"
+        updatePolicy:
+          updateMode: "Auto"
+        resourcePolicy:
+          containerPolicies:
+            - containerName: exporter
+              minAllowed:
+                cpu: 5m
+                memory: 32Mi
+              maxAllowed:
+                cpu: 200m
+                memory: 256Mi
+
+- name: Create exporter PDB
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: "{{ app.name }}-exporter-pdb"
+        namespace: "{{ inventory_hostname }}"
+        labels:
+          app.kubernetes.io/name: "{{ app.name }}"
+          app.kubernetes.io/component: exporter
+      spec:
+        minAvailable: 1
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: "{{ app.name }}"
+            app.kubernetes.io/component: exporter

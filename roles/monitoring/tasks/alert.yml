@@ -8,7 +8,7 @@
         name: "telegram-bot-token"
         namespace: "{{ inventory_hostname }}"
       stringData:
-        access_token: "{{ secrets.telegram.token }}"
+        bot_token: "{{ secrets.telegram.token }}"
 
 - name: Create AlertmanagerConfig
   kubernetes.core.k8s:
@@ -25,13 +25,16 @@
           groupWait: 20s
           groupInterval: 5m
           repeatInterval: 2h
-          matchers: []
+          matchers:
+            - matchType: "="
+              name: "app"
+              value: "{{ app.name }}"
         receivers:
           - name: "telegram"
             telegramConfigs:
               - botToken:
                   name: telegram-bot-token
-                  key: access_token
+                  key: bot_token
                 chatID: "{{ secrets.telegram.chat_id | int }}"
                 parseMode: "Markdown"
                 message: |

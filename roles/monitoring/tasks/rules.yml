@@ -11,120 +11,257 @@
           app.kubernetes.io/component: monitoring
       spec:
         groups:
+          # ==================== Sync Job Alerts ====================
           - name: "{{ app.name }}-sync-alerts"
             rules:
               - alert: SidocSyncJobFailed
-                expr: kube_job_failed{namespace="{{ inventory_hostname }}", job_name="{{ app.name }}-sync"} > 0
-                for: 5m
+                expr: |
+                  kube_job_failed{namespace="{{ inventory_hostname }}", job_name=~"{{ app.name }}-sync.*"} > 0
+                  and
+                  kube_job_status_completion_time{namespace="{{ inventory_hostname }}", job_name=~"{{ app.name }}-sync.*"} > 0
+                for: 1m
                 labels:
                   severity: critical
+                  app: "{{ app.name }}"
+                  component: sync
                 annotations:
-                  summary: Sidoc sync job failed
-                  description: The Sidoc sync job has failed. Check logs for details.
+                  summary: "Sidoc sync job failed"
+                  description: >-
+                    {% raw %}The Sidoc sync job {{ $labels.job_name }} has failed in namespace {{ $labels.namespace }}.{% endraw %}
 
               - alert: SidocSyncJobRunningTooLong
-                expr: time() - kube_job_status_start_time{namespace="{{ inventory_hostname }}", job_name="{{ app.name }}-sync"} > 3600
+                expr: |
+                  (time() - kube_job_status_start_time{namespace="{{ inventory_hostname }}", job_name=~"{{ app.name }}-sync.*"} > 3600)
+                  and
+                  (kube_job_status_active{namespace="{{ inventory_hostname }}", job_name=~"{{ app.name }}-sync.*"} > 0)
                 for: 5m
                 labels:
                   severity: critical
+                  app: "{{ app.name }}"
+                  component: sync
                 annotations:
-                  summary: Sidoc sync running too long
-                  description: The Sidoc sync job has been running for more than 1 hour.
+                  summary: "Sidoc sync job running too long"
+                  description: >-
+                    {% raw %}The Sidoc sync job {{ $labels.job_name }} has been running for more than 1 hour ({{ $value | humanizeDuration }}).{% endraw %}
 
+              - alert: SidocSyncJobNotScheduled
+                expr: |
+                  (time() - max(kube_job_status_start_time{namespace="{{ inventory_hostname }}", job_name=~"{{ app.name }}-sync.*"})) > 86400
+                  or
+                  absent(kube_job_status_start_time{namespace="{{ inventory_hostname }}", job_name=~"{{ app.name }}-sync.*"})
+                for: 30m
+                labels:
+                  severity: warning
+                  app: "{{ app.name }}"
+                  component: sync
+                annotations:
+                  summary: "Sidoc sync job not scheduled"
+                  description: >-
+                    {% raw %}No Sidoc sync job has been scheduled or started in the last 24 hours.{% endraw %}
+
+              - alert: SidocSyncJobStuck
+                expr: |
+                  (kube_job_status_active{namespace="{{ inventory_hostname }}", job_name=~"{{ app.name }}-sync.*"} > 0)
+                  and
+                  (time() - kube_job_status_start_time{namespace="{{ inventory_hostname }}", job_name=~"{{ app.name }}-sync.*"} > 7200)
+                for: 10m
+                labels:
+                  severity: critical
+                  app: "{{ app.name }}"
+                  component: sync
+                annotations:
+                  summary: "Sidoc sync job stuck"
+                  description: >-
+                    {% raw %}The Sidoc sync job {{ $labels.job_name }} has been running for more than 2 hours and may be stuck.{% endraw %}
+
+              - alert: SidocSyncJobBackoffLimit
+                expr: |
+                  kube_job_status_failed{namespace="{{ inventory_hostname }}", job_name=~"{{ app.name }}-sync.*"}
+                  >=
+                  kube_job_spec_backoff_limit{namespace="{{ inventory_hostname }}", job_name=~"{{ app.name }}-sync.*"}
+                for: 5m
+                labels:
+                  severity: critical
+                  app: "{{ app.name }}"
+                  component: sync
+                annotations:
+                  summary: "Sidoc sync job reached backoff limit"
+                  description: >-
+                    {% raw %}The Sidoc sync job {{ $labels.job_name }} has reached its backoff limit after {{ $value }} failures.{% endraw %}
+
+          # ==================== Runtime Pod Alerts (web, exporter, collaboration, redis) ====================
           - name: "{{ app.name }}-pod-alerts"
             rules:
               - alert: SidocPodRestartingTooOften
-                expr: increase(kube_pod_container_status_restarts_total{namespace="{{ inventory_hostname }}", pod=~"{{ app.name }}-.*", pod!~"{{ app.name }}-(sync|redis|exporter).*"}[30m]) > 3
+                expr: increase(kube_pod_container_status_restarts_total{namespace="{{ inventory_hostname }}", pod=~"{{ app.name }}-(web|exporter|collaboration|redis)-.*"}[30m]) > 3
                 for: 5m
                 labels:
                   severity: critical
+                  app: "{{ app.name }}"
+                  component: runtime
                 annotations:
-                  summary: Sidoc application pod restarting too often
-                  description: The Sidoc application pod has restarted more than 3 times in the last 30 minutes.
+                  summary: "Sidoc runtime pod restarting too often"
+                  description: >-
+                    {% raw %}The Sidoc pod {{ $labels.pod }} has restarted {{ $value }} times in the last 30 minutes.{% endraw %}
 
               - alert: SidocPodNotReady
                 expr: |
-                  sum by (pod) (kube_pod_status_phase{namespace="{{ inventory_hostname }}", pod=~"{{ app.name }}-[^(sync|redis|exporter)].*", phase=~"Running|Pending"}) > 0
+                  sum by (pod) (kube_pod_status_phase{namespace="{{ inventory_hostname }}", pod=~"{{ app.name }}-(web|exporter|collaboration|redis)-.*", phase=~"Running|Pending"}) > 0
                   and
-                  sum by (pod) (kube_pod_status_ready{namespace="{{ inventory_hostname }}", pod=~"{{ app.name }}-[^(sync|redis|exporter)].*", condition="true"}) == 0
+                  sum by (pod) (kube_pod_status_ready{namespace="{{ inventory_hostname }}", pod=~"{{ app.name }}-(web|exporter|collaboration|redis)-.*", condition="true"}) == 0
                 for: 45s
                 labels:
                   severity: critical
+                  app: "{{ app.name }}"
+                  component: runtime
                 annotations:
-                  summary: Sidoc application pod is not ready
-                  description: The Sidoc application pod is running but not ready for more than 45 seconds.
+                  summary: "Sidoc runtime pod is not ready"
+                  description: >-
+                    {% raw %}The Sidoc pod {{ $labels.pod }} is running but not ready for more than 45 seconds.{% endraw %}
 
-          - name: "{{ app.name }}-redis-alerts"
-            rules:
-              - alert: SidocRedisPodMissing
-                expr: absent(kube_pod_info{namespace="{{ inventory_hostname }}", pod=~"{{ app.name }}-redis-.*"})
+              - alert: SidocRuntimePodMissing
+                expr: |
+                  absent(kube_pod_info{namespace="{{ inventory_hostname }}", pod=~"{{ app.name }}-web-.*"})
+                  or
+                  absent(kube_pod_info{namespace="{{ inventory_hostname }}", pod=~"{{ app.name }}-exporter-.*"})
+                  or
+                  absent(kube_pod_info{namespace="{{ inventory_hostname }}", pod=~"{{ app.name }}-collaboration-.*"})
+                  or
+                  absent(kube_pod_info{namespace="{{ inventory_hostname }}", pod=~"{{ app.name }}-redis-.*"})
                 for: 15s
                 labels:
                   severity: critical
+                  app: "{{ app.name }}"
+                  component: runtime
                 annotations:
-                  summary: Sidoc Redis pod is missing
-                  description: No Redis pod for Sidoc is running for more than 15 seconds.
+                  summary: "Sidoc runtime pod is missing"
+                  description: "One or more runtime pods (web, exporter, collaboration, redis) for Sidoc are missing for more than 15 seconds."
 
-          - name: "{{ app.name }}-endpoint-alerts"
+              - alert: SidocPodCrashLooping
+                expr: rate(kube_pod_container_status_restarts_total{namespace="{{ inventory_hostname }}", pod=~"{{ app.name }}-(web|exporter|collaboration|redis)-.*"}[15m]) > 0
+                for: 15m
+                labels:
+                  severity: critical
+                  app: "{{ app.name }}"
+                  component: runtime
+                annotations:
+                  summary: "Sidoc runtime pod in crash loop"
+                  description: >-
+                    {% raw %}The Sidoc pod {{ $labels.pod }} is in a crash loop with {{ $value }} restarts.{% endraw %}
+
+              - alert: SidocPodHighCPUUsage
+                expr: |
+                  (sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="{{ inventory_hostname }}", pod=~"{{ app.name }}-(web|exporter|collaboration|redis)-.*"}[5m]))
+                  /
+                  sum by (pod) (kube_pod_container_resource_limits{namespace="{{ inventory_hostname }}", pod=~"{{ app.name }}-(web|exporter|collaboration|redis)-.*", resource="cpu"})) > 0.9
+                for: 10m
+                labels:
+                  severity: warning
+                  app: "{{ app.name }}"
+                  component: runtime
+                annotations:
+                  summary: "Sidoc runtime pod high CPU usage"
+                  description: >-
+                    {% raw %}The Sidoc pod {{ $labels.pod }} is using {{ $value | humanizePercentage }} of its CPU limit.{% endraw %}
+
+          # ==================== URL Monitoring Alerts ====================
+          - name: "{{ app.name }}-url-alerts"
             rules:
-              - alert: SidocEndpointDown
+              - alert: SidocURLDown
                 expr: probe_success{job="{{ app.name }}-probe"} == 0
                 for: 1m
                 labels:
                   severity: critical
+                  app: "{{ app.name }}"
+                  component: url
                 annotations:
-                  summary: Sidoc endpoint is down
-                  description: The Sidoc endpoint has been unreachable for over 1 minute.
+                  summary: "Sidoc URL is down"
+                  description: >-
+                    {% raw %}The Sidoc URL {{ $labels.target_url }} is unreachable.{% endraw %}
 
-              - alert: SidocSlowResponse
-                expr: probe_duration_seconds{job="{{ app.name }}-probe"} > 2
-                for: 5m
-                labels:
-                  severity: warning
-                annotations:
-                  summary: Sidoc slow response time
-                  description: The Sidoc endpoint is responding slowly (>2s) for over 5 minutes.
-
-              - alert: SidocSSLCertExpiringSoon
-                expr: probe_ssl_earliest_cert_expiry{job="{{ app.name }}-probe"} - time() < 86400 * 14
-                for: 1h
-                labels:
-                  severity: warning
-                annotations:
-                  summary: Sidoc SSL certificate expiring soon
-                  description: The SSL certificate for Sidoc will expire in less than 14 days.
-
-          - name: "{{ app.name }}-url-alerts"
-            rules:
-              - alert: "SidocURLSlowResponse"
-                expr: >
-                  probe_duration_seconds{service="sidoc"} > 5
+              - alert: SidocURLSlowResponse
+                expr: probe_duration_seconds{job="{{ app.name }}-probe"} > 5
                 for: 2m
                 labels:
                   severity: warning
+                  app: "{{ app.name }}"
+                  component: url
                 annotations:
                   summary: "Sidoc URL slow response"
                   description: >-
-                    {% raw %}The Sidoc URL {{ $labels.target_url }} is responding slowly ({{ $value }}s).{% endraw %}
+                    {% raw %}The Sidoc URL {{ $labels.target_url }} is responding slowly ({{ $value }}s, threshold: 5s).{% endraw %}
 
-              - alert: "SidocURLCertificateExpiry"
-                expr: >
-                  probe_ssl_earliest_cert_expiry{service="sidoc"} - time() < 86400 * 7
+              - alert: SidocURLCertificateExpiry
+                expr: probe_ssl_earliest_cert_expiry{job="{{ app.name }}-probe"} - time() < 86400 * 30
                 for: 1m
                 labels:
                   severity: warning
+                  app: "{{ app.name }}"
+                  component: url
                 annotations:
                   summary: "Sidoc SSL certificate expiring soon"
                   description: >-
                     {% raw %}SSL certificate for {{ $labels.target_url }} expires in {{ $value | humanizeDuration }}.{% endraw %}
 
-              - alert: "SidocURLUnexpectedStatusCode"
-                expr: >
-                  probe_http_status_code{service="sidoc"} != 200
-                for: 1m
+          # ==================== Deployment & Availability Alerts ====================
+          - name: "{{ app.name }}-deployment-alerts"
+            rules:
+              - alert: SidocDeploymentReplicasMismatch
+                expr: |
+                  kube_deployment_spec_replicas{namespace="{{ inventory_hostname }}", deployment=~"{{ app.name }}-(web|exporter|collaboration|redis)"}
+                  !=
+                  kube_deployment_status_replicas_available{namespace="{{ inventory_hostname }}", deployment=~"{{ app.name }}-(web|exporter|collaboration|redis)"}
+                for: 10m
+                labels:
+                  severity: warning
+                  app: "{{ app.name }}"
+                  component: deployment
+                annotations:
+                  summary: "Sidoc deployment replicas mismatch"
+                  description: >-
+                    {% raw %}Deployment {{ $labels.deployment }} has mismatched replicas (expected vs available).{% endraw %}
+
+              - alert: SidocNoPodsAvailable
+                expr: kube_deployment_status_replicas_available{namespace="{{ inventory_hostname }}", deployment=~"{{ app.name }}-(web|exporter|collaboration|redis)"} == 0
+                for: 2m
                 labels:
                   severity: critical
+                  app: "{{ app.name }}"
+                  component: deployment
                 annotations:
-                  summary: "Sidoc URL unexpected status code"
+                  summary: "Sidoc deployment has no pods available"
                   description: >-
-                    {% raw %}The Sidoc URL {{ $labels.target_url }} returned invalid status code {{ $value }}.{% endraw %}
+                    {% raw %}Deployment {{ $labels.deployment }} has no available pods.{% endraw %}
+
+          # ==================== Persistent Volume Alerts ====================
+          - name: "{{ app.name }}-storage-alerts"
+            rules:
+              - alert: SidocPVCAlmostFull
+                expr: |
+                  (kubelet_volume_stats_used_bytes{namespace="{{ inventory_hostname }}", persistentvolumeclaim=~"{{ app.name }}-.*"}
+                  /
+                  kubelet_volume_stats_capacity_bytes{namespace="{{ inventory_hostname }}", persistentvolumeclaim=~"{{ app.name }}-.*"}) > 0.85
+                for: 5m
+                labels:
+                  severity: warning
+                  app: "{{ app.name }}"
+                  component: storage
+                annotations:
+                  summary: "Sidoc PVC almost full"
+                  description: >-
+                    {% raw %}PVC {{ $labels.persistentvolumeclaim }} is {{ $value | humanizePercentage }} full.{% endraw %}
+
+              - alert: SidocPVCFull
+                expr: |
+                  (kubelet_volume_stats_used_bytes{namespace="{{ inventory_hostname }}", persistentvolumeclaim=~"{{ app.name }}-.*"}
+                  /
+                  kubelet_volume_stats_capacity_bytes{namespace="{{ inventory_hostname }}", persistentvolumeclaim=~"{{ app.name }}-.*"}) > 0.95
+                for: 2m
+                labels:
+                  severity: critical
+                  app: "{{ app.name }}"
+                  component: storage
+                annotations:
+                  summary: "Sidoc PVC critically full"
+                  description: >-
+                    {% raw %}PVC {{ $labels.persistentvolumeclaim }} is {{ $value | humanizePercentage }} full.{% endraw %}
