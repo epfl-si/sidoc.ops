@@ -3,26 +3,12 @@ secrets: "{{ _secrets_file[env] }}"
 
 app:
   name: outline
-  display: "Sidoc{{ ' - Test' if env == 'test' else '' }}"
+  display: "SiDoc{{ ' - Test' if env == 'test' else '' }}"
   domain: "sidoc{{ '-test' if env == 'test' else '' }}.epfl.ch"
   url: "https://sidoc{{ '-test' if env == 'test' else '' }}.epfl.ch"
 
 registry: quay-its.epfl.ch/svc1755
 pull_secret: svc1755-pull-secret
-
-images:
-  web:
-    version: "0.84.10"
-  init:
-    version: "1.2.1"
-  sync:
-    version: "1.11.1"
-  exporter:
-    version: "1.4.2"
-  redis:
-    version: "8.4.0"
-  blackbox:
-    version: "0.28.0"
 
 database:
   cluster: outline-postgres

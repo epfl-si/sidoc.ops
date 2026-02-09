@@ -1,19 +1,33 @@
+images:
+  web:
+    version: "1.4.0"
+  init:
+    version: "1.2.1"
+  sync:
+    version: "2.0.1"
+  exporter:
+    version: "1.4.2"
+  redis:
+    version: "8.4.0"
+  blackbox:
+    version: "0.28.0"
+
 resources:
   web:
     replicas: 1
     storage: 5Gi
     requests:
       cpu: 295m
-      memory: 590Mi
+      memory: 750Mi
     limits:
-      memory: 590Mi
+      memory: 750Mi
 
   collaboration:
     requests:
       cpu: 295m
-      memory: 590Mi
+      memory: 750Mi
     limits:
-      memory: 590Mi
+      memory: 750Mi
 
   redis:
     storage: 1Gi
@@ -40,12 +54,12 @@ resources:
   exporter:
     requests:
       cpu: 5m
-      memory: 16Mi
+      memory: 64Mi
     limits:
-      memory: 32Mi
+      memory: 64Mi
 
   database:
-    storage: 5Gi
+    storage: 10Gi
     replicas: 2
     requests:
       cpu: 100m
