@@ -11,6 +11,7 @@
           app.kubernetes.io/name: "{{ app.name }}"
           app.kubernetes.io/component: database
       spec:
+        enablePDB: false
         instances: "{{ resources.database.replicas }}"
         monitoring:
           enablePodMonitor: true
