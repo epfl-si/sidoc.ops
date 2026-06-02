@@ -40,14 +40,14 @@ resources:
   sync:
     requests:
       cpu: 25m
-      memory: 64Mi
+      memory: 128Mi
     limits:
       memory: 128Mi
 
   init:
     requests:
       cpu: 25m
-      memory: 64Mi
+      memory: 128Mi
     limits:
       memory: 128Mi
 
@@ -63,13 +63,13 @@ resources:
     replicas: 2
     requests:
       cpu: 100m
-      memory: 256Mi
+      memory: 512Mi
     limits:
       memory: 512Mi
 
   blackbox:
     requests:
       cpu: 25m
-      memory: 64Mi
+      memory: 128Mi
     limits:
       memory: 128Mi
