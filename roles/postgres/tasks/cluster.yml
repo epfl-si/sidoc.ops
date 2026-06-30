@@ -21,10 +21,10 @@
         enableSuperuserAccess: true
         resources:
           requests:
-            cpu: "{{ resources.database.requests.cpu }}"
-            memory: "{{ resources.database.requests.memory }}"
+            cpu: "{{ resources.database.cpu }}"
+            memory: "{{ resources.database.memory }}"
           limits:
-            memory: "{{ resources.database.limits.memory }}"
+            memory: "{{ resources.database.memory }}"
         backup:
           barmanObjectStore:
             destinationPath: "s3://{{ secrets.s3.name }}"

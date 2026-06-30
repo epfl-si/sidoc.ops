@@ -95,10 +95,10 @@
                     npm run start -- --services=collaboration
                 resources:
                   requests:
-                    cpu: "{{ resources.collaboration.requests.cpu }}"
-                    memory: "{{ resources.collaboration.requests.memory }}"
+                    cpu: "{{ resources.collaboration.cpu }}"
+                    memory: "{{ resources.collaboration.memory }}"
                   limits:
-                    memory: "{{ resources.collaboration.limits.memory }}"
+                    memory: "{{ resources.collaboration.memory }}"
                 readinessProbe:
                   tcpSocket:
                     port: 3000

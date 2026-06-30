@@ -110,10 +110,10 @@
                       name: "{{ app.name }}-secrets"
                 resources:
                   requests:
-                    cpu: "{{ resources.web.requests.cpu }}"
-                    memory: "{{ resources.web.requests.memory }}"
+                    cpu: "{{ resources.web.cpu }}"
+                    memory: "{{ resources.web.memory }}"
                   limits:
-                    memory: "{{ resources.web.limits.memory }}"
+                    memory: "{{ resources.web.memory }}"
                 readinessProbe:
                   tcpSocket:
                     port: 3000

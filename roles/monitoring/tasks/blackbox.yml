@@ -80,10 +80,10 @@
                     name: http
                 resources:
                   requests:
-                    cpu: "{{ resources.blackbox.requests.cpu }}"
-                    memory: "{{ resources.blackbox.requests.memory }}"
+                    cpu: "{{ resources.blackbox.cpu }}"
+                    memory: "{{ resources.blackbox.memory }}"
                   limits:
-                    memory: "{{ resources.blackbox.limits.memory }}"
+                    memory: "{{ resources.blackbox.memory }}"
                 readinessProbe:
                   httpGet:
                     path: /health

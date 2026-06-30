@@ -143,10 +143,10 @@
                     value: "{{ app.name }}-api-key-monitoring"
                 resources:
                   requests:
-                    cpu: "{{ resources.init.requests.cpu }}"
-                    memory: "{{ resources.init.requests.memory }}"
+                    cpu: "{{ resources.init.cpu }}"
+                    memory: "{{ resources.init.memory }}"
                   limits:
-                    memory: "{{ resources.init.limits.memory }}"
+                    memory: "{{ resources.init.memory }}"
             restartPolicy: OnFailure
             imagePullSecrets:
               - name: "{{ pull_secret }}"

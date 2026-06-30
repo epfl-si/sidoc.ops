@@ -39,10 +39,10 @@
                         key: API_KEY
                 resources:
                   requests:
-                    cpu: "{{ resources.exporter.requests.cpu }}"
-                    memory: "{{ resources.exporter.requests.memory }}"
+                    cpu: "{{ resources.exporter.cpu }}"
+                    memory: "{{ resources.exporter.memory }}"
                   limits:
-                    memory: "{{ resources.exporter.limits.memory }}"
+                    memory: "{{ resources.exporter.memory }}"
                 readinessProbe:
                   httpGet:
                     path: /healthz

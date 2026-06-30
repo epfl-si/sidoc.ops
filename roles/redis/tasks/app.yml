@@ -49,10 +49,10 @@
                   - containerPort: 6379
                 resources:
                   requests:
-                    cpu: "{{ resources.redis.requests.cpu }}"
-                    memory: "{{ resources.redis.requests.memory }}"
+                    cpu: "{{ resources.redis.cpu }}"
+                    memory: "{{ resources.redis.memory }}"
                   limits:
-                    memory: "{{ resources.redis.limits.memory }}"
+                    memory: "{{ resources.redis.memory }}"
                 volumeMounts:
                   - name: data
                     mountPath: /data
