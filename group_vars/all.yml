@@ -21,6 +21,7 @@ storage_class:
 
 allowed_collections:
   - welcome
+  - 'open knowledge'
 
 allowed_units:
   # DSI
