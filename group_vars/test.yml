@@ -1,6 +1,6 @@
 images:
   web:
-    version: "1.8.0"
+    version: "1.9.2"
   init:
     version: "1.2.1"
   sync:
