@@ -19,6 +19,9 @@ database:
 storage_class:
   name: ocs-storagecluster-cephfs
 
+allowed_collections:
+  - welcome
+
 allowed_units:
   # DSI
   - DSI-EMP
