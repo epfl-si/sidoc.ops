@@ -4,7 +4,7 @@ images:
   init:
     version: "1.2.1"
   sync:
-    version: "2.0.1"
+    version: "2.0.2"
   exporter:
     version: "1.4.2"
   redis:
