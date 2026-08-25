@@ -28,6 +28,7 @@
       stringData:
         OUTLINE_BASE_URL: "{{ app.url }}"
         OUTLINE_ADMIN_GROUP: sidoc-admins
+        OUTLINE_ALLOWED_COLLECTIONS: "{{ allowed_collections | join(',') }}"
         EPFL_ACCESS_GROUP: sidoc-access
         EPFL_ALLOWED_UNITS_FILE: /opt/allowed-units.json
         EPFL_API_URL: "{{ secrets.sync.api.url }}"
