@@ -54,7 +54,7 @@ allowed_units:
   - SISB-USEP
   - VPA-SISB-GE
   # Centers
-  - C4DT
+  - C4DT-GE
   - IMAGING-GE
   # Mediacom
   - MEC
