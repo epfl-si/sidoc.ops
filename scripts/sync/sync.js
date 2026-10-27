@@ -13,11 +13,17 @@ const logger = {
 	debug: (msg, data) => process.env.DEBUG === 'true' && logger._log('DEBUG', msg, data),
 };
 
+const MAX_CONSECUTIVE_EPFL_ERRORS = 5;
+
 /**
  * OutlineSync - Synchronization utility for Outline Wiki
  * Handles user/group sync, admin sync, collections sync, and sidoc.readwrite authorizations
  *
+ * Users are matched to the EPFL directory by SCIPER: each Outline user is resolved once
+ * (see epflFindPersonForEmail) and the result is shared by the following steps.
+ *
  * Optional environment:
+ *   OUTLINE_SSO_EMAIL_DOMAIN=epfl.ch   domain of the SSO e-mail, used to match accounts by username
  *   OUTLINE_TLS_INSECURE=true          skip TLS verification for the Outline API
  */
 class OutlineSync {
@@ -81,6 +87,7 @@ class OutlineSync {
 
 	_initCache() {
 		this.cache = { users: null, groups: null, collections: null, allowedUnits: null, members: new Map() };
+		this.identities = null;
 	}
 
 	_initConfig() {
@@ -88,6 +95,7 @@ class OutlineSync {
 		this.ADMIN_GROUP = 'ADMINS';
 		this.ALLOWED_COLLECTIONS = (process.env.OUTLINE_ALLOWED_COLLECTIONS || 'welcome').split(',').map((s) => s.toLowerCase());
 		this.ACCESS_GROUP = process.env.EPFL_ACCESS_GROUP;
+		this.SSO_EMAIL_DOMAIN = (process.env.OUTLINE_SSO_EMAIL_DOMAIN || 'epfl.ch').toLowerCase();
 	}
 
 	/**
@@ -386,36 +394,53 @@ class OutlineSync {
 
 	/**
 	 * Get person from EPFL API
-	 * @param {string|number} identifier - Email or SCIPER
+	 * @param {string|number} identifier - Email, username or SCIPER
 	 * @returns {object|null}
 	 */
 	async epflGetPerson(identifier) {
 		logger.info('Fetching person from EPFL API', { identifier });
-		try {
-			const res = await this._retry(() => this.epfl.get(`/persons/${identifier}`));
-			logger.info('Person fetched from EPFL', { identifier, email: res.data.email });
-			return res.data;
-		} catch (err) {
-			if (err.response?.status === 404) {
-				logger.info('Person not found in EPFL', { identifier });
-				return null;
-			}
-			throw err;
+		const res = await this._retry(() => this.epfl.get(`/persons/${encodeURIComponent(identifier)}`, {
+			validateStatus: (status) => (status >= 200 && status < 300) || status === 404,
+		}));
+		if (res.status === 404) {
+			logger.info('Person not found in EPFL', { identifier });
+			return null;
 		}
+		logger.info('Person fetched from EPFL', { identifier, sciper: res.data.id });
+		return res.data;
 	}
 
 	/**
-	 * Get user units from EPFL API
-	 * @param {string} email
-	 * @returns {Array|null} - null if user not found
+	 * Find the EPFL person behind an Outline account
+	 * The Outline e-mail comes from the SSO identity, which is not always the directory e-mail:
+	 * an external gets <username>@epfl.ch while the directory holds their own address.
+	 * So after the e-mail lookup, the local part is tried as a username.
+	 * @param {string} email - Outline e-mail
+	 * @returns {object|null} - null only if the person really is unknown
 	 */
-	async epflGetUserUnits(email) {
+	async epflFindPersonForEmail(email) {
 		const person = await this.epflGetPerson(email);
-		if (!person) return null;
-		logger.info('Fetching units for user from EPFL', { email, persid: person.id });
-		const res = await this._retry(() => this.epfl.get(`/units?persid=${person.id}`));
+		if (person) return person;
+
+		const [local, domain] = email.toLowerCase().split('@');
+		if (!local || domain !== this.SSO_EMAIL_DOMAIN) return null;
+
+		const byUsername = await this.epflGetPerson(local);
+		if (byUsername?.username?.toLowerCase() !== local) return null;
+
+		logger.info('Person matched by username', { email, sciper: byUsername.id });
+		return byUsername;
+	}
+
+	/**
+	 * Get units a person is accredited in
+	 * @param {string|number} sciper
+	 * @returns {Array}
+	 */
+	async epflGetUnits(sciper) {
+		const res = await this._retry(() => this.epfl.get('/units', { params: { persid: sciper } }));
 		const units = res.data.units || [];
-		logger.info('User units fetched from EPFL', { email, count: units.length });
+		logger.info('User units fetched from EPFL', { sciper, count: units.length });
 		return units;
 	}
 
@@ -466,97 +491,139 @@ class OutlineSync {
 	}
 
 	/**
-	 * Sync users based on unit accreditation
+	 * Resolve every Outline user to its EPFL person and accreditations
+	 * A user left unresolved because of an API error is never touched by the following steps.
+	 */
+	async resolveIdentities() {
+		const users = await this.getUsers(true);
+		const allowedUnits = await this.getAllowedUnits();
+		const identities = new Map();
+		let consecutiveErrors = 0;
+
+		for (const user of users) {
+			if (user.isSuspended) {
+				identities.set(user.id, { status: 'suspended' });
+				continue;
+			}
+
+			try {
+				const person = await this.epflFindPersonForEmail(user.email);
+				if (!person) {
+					identities.set(user.id, { status: 'missing' });
+				} else {
+					const units = (await this.epflGetUnits(person.id)).filter((u) => this.isUnitAllowed(u.name, allowedUnits));
+					identities.set(user.id, { status: 'resolved', sciper: Number(person.id), units });
+					logger.info('Retrieved units for user', { email: user.email, sciper: person.id, allowed: units.length });
+				}
+				consecutiveErrors = 0;
+			} catch (err) {
+				identities.set(user.id, { status: 'error' });
+				logger.error('Could not resolve user, leaving untouched', { email: user.email, message: err.message });
+				if (++consecutiveErrors >= MAX_CONSECUTIVE_EPFL_ERRORS) {
+					throw new Error(`EPFL API unreachable: ${consecutiveErrors} consecutive failures`);
+				}
+			}
+		}
+
+		this.identities = identities;
+		const count = (status) => [...identities.values()].filter((i) => i.status === status).length;
+		logger.info('Identities resolved', { users: users.length, resolved: count('resolved'), missing: count('missing'), suspended: count('suspended'), errors: count('error') });
+	}
+
+	/**
+	 * Suspend users that no longer exist at EPFL
 	 */
 	async syncUsers() {
-		const users = await this.getUsers(true);
-		const groups = await this.getGroups();
-		const allowedUnits = await this.getAllowedUnits();
+		const users = await this.getUsers();
+		const missing = users.filter((u) => this.identities.get(u.id).status === 'missing');
+		const stats = { missing: missing.length, suspended: 0 };
 
-		logger.info('Starting user synchronization', {
-			users: users.length,
-			groups: groups.length,
-			allowedUnits: allowedUnits === false ? 'all' : allowedUnits.length,
-		});
-
-		const stats = { processed: 0, suspended: 0, groupsCreated: 0, added: 0, removed: 0 };
-		const userUnitsMap = new Map();
-		const validGroups = new Set([this.ADMIN_GROUP.toLowerCase()]);
-
-		for (const user of users) {
-			const units = await this.epflGetUserUnits(user.email);
-
-			if (units === null) {
-				logger.warn('User no longer exists in EPFL, suspending', { email: user.email, userId: user.id });
-				await this.suspendUser(user.id, user.email);
-				stats.suspended++;
-				userUnitsMap.set(user.email, []);
-				continue;
-			}
-
-			const filtered = units.filter((u) => this.isUnitAllowed(u.name, allowedUnits));
-			userUnitsMap.set(user.email, filtered);
-			stats.processed++;
-
-			logger.info('Retrieved units for user', { email: user.email, total: units.length, allowed: filtered.length });
-		}
-
-		logger.info('Unit data retrieval completed', { users: users.length, unitsFound: stats.processed });
-
-		for (const user of users) {
-			const units = userUnitsMap.get(user.email) || [];
-			logger.info('Processing user units', { email: user.email, units: units.length });
-
-			for (const unit of units) {
-				let group = await this.findGroup(unit.name);
-				if (!group) {
-					group = await this.createGroup(unit.name);
-					stats.groupsCreated++;
-				}
-
-				const added = await this.addUserToGroup(user.id, group.id);
-				if (added) {
-					logger.info('User added to group', { email: user.email, group: unit.name });
-					stats.added++;
-				}
-
-				validGroups.add(unit.name.toLowerCase());
-			}
-		}
-
-		const allGroups = await this.getGroups(true);
-		for (const group of allGroups) {
-			const nameLower = group.name.toLowerCase();
-			if (nameLower === this.ADMIN_GROUP.toLowerCase()) continue;
-
-			if (!validGroups.has(nameLower)) {
-				const members = await this.getGroupMembers(group.id);
-				if (members.length === 0) {
-					await this.deleteGroup(group.id, group.name);
-					logger.info('Obsolete empty group deleted', { group: group.name });
-				} else {
-					logger.debug('Group not deleted - has members', { group: group.name, members: members.length });
-				}
-				continue;
-			}
-
-			const members = await this.getGroupMembers(group.id);
-			for (const member of members) {
-				const user = users.find((u) => u.id === member.id);
-				if (!user) continue;
-
-				const userUnits = userUnitsMap.get(user.email) || [];
-				const shouldBeIn = userUnits.some((u) => u.name.toLowerCase() === nameLower);
-
-				if (!shouldBeIn) {
-					await this.removeUserFromGroup(member.id, group.id);
-					stats.removed++;
-					logger.info('User removed from group', { email: user.email, group: group.name });
-				}
-			}
+		for (const user of missing) {
+			logger.warn('User no longer exists in EPFL, suspending', { email: user.email, userId: user.id });
+			await this.suspendUser(user.id, user.email);
+			this.identities.get(user.id).status = 'suspended';
+			stats.suspended++;
 		}
 
 		logger.info('User synchronization completed', stats);
+	}
+
+	/**
+	 * Sync unit groups: members are the users accredited in the unit
+	 */
+	async syncGroups() {
+		const users = await this.getUsers();
+		const allowedUnits = await this.getAllowedUnits();
+
+		// unit name (lowercase) -> users that must be in the matching group
+		const desired = new Map();
+		const want = (unitName, userId) => {
+			const key = unitName.toLowerCase();
+			if (!desired.has(key)) desired.set(key, { name: unitName, userIds: new Set() });
+			desired.get(key).userIds.add(userId);
+		};
+
+		// users whose memberships are known well enough to be added to *and* removed from groups
+		const managed = new Set();
+
+		for (const user of users) {
+			const identity = this.identities.get(user.id);
+			if (identity.status === 'suspended') {
+				managed.add(user.id);
+			} else if (identity.status === 'resolved') {
+				managed.add(user.id);
+				for (const unit of identity.units) want(unit.name, user.id);
+			}
+		}
+
+		const stats = { groupsCreated: 0, groupsDeleted: 0, added: 0, removed: 0 };
+		const usersById = new Map(users.map((u) => [u.id, u]));
+
+		for (const { name, userIds } of desired.values()) {
+			let group = await this.findGroup(name);
+			if (!group) {
+				group = await this.createGroup(name);
+				stats.groupsCreated++;
+			}
+
+			for (const userId of userIds) {
+				if (await this.addUserToGroup(userId, group.id)) {
+					logger.info('User added to group', { email: usersById.get(userId).email, group: name });
+					stats.added++;
+				}
+			}
+		}
+
+		for (const group of [...(await this.getGroups())]) {
+			const nameLower = group.name.toLowerCase();
+			if (nameLower === this.ADMIN_GROUP.toLowerCase()) continue;
+
+			const wanted = desired.get(nameLower)?.userIds;
+			const members = await this.getGroupMembers(group.id);
+
+			if (!wanted && members.length === 0) {
+				await this.deleteGroup(group.id, group.name);
+				stats.groupsDeleted++;
+				continue;
+			}
+
+			// Without a list of allowed units, a group nobody is expected in cannot be told from a hand-made one
+			const isUnitGroup = wanted || (allowedUnits !== false && allowedUnits.includes(nameLower));
+			if (!isUnitGroup) {
+				logger.debug('Group not deleted - has members', { group: group.name, members: members.length });
+				continue;
+			}
+
+			for (const member of members) {
+				if (!managed.has(member.id) || wanted?.has(member.id)) continue;
+				if (await this.removeUserFromGroup(member.id, group.id)) {
+					logger.info('User removed from group', { email: usersById.get(member.id)?.email, group: group.name });
+					stats.removed++;
+				}
+			}
+		}
+
+		logger.info('Group synchronization completed', stats);
 	}
 
 	/**
@@ -746,8 +813,14 @@ class OutlineSync {
 	 * Run full synchronization
 	 */
 	async run() {
+		logger.info('Starting identity resolution process');
+		await this.resolveIdentities();
+
 		logger.info('Starting user synchronization process');
 		await this.syncUsers();
+
+		logger.info('Starting group synchronization process');
+		await this.syncGroups();
 
 		logger.info('Starting authorized users synchronization process');
 		await this.syncAuthorizedUsers();
