@@ -80,7 +80,7 @@ class OutlineSync {
 	}
 
 	_initCache() {
-		this.cache = { users: null, groups: null, collections: null, allowedUnits: null };
+		this.cache = { users: null, groups: null, collections: null, allowedUnits: null, members: new Map() };
 	}
 
 	_initConfig() {
@@ -245,15 +245,18 @@ class OutlineSync {
 	}
 
 	/**
-	 * Get members of an Outline group
+	 * Get members of an Outline group (fetched once per run, then kept up to date by our own writes)
 	 * @param {string} groupId
 	 * @returns {Array}
 	 */
 	async getGroupMembers(groupId) {
-		logger.info('Fetching group members from Outline', { groupId });
-		const members = await this._outlineList('/api/groups.memberships', { id: groupId }, 'users');
-		logger.info('Group members fetched', { groupId, count: members.length });
-		return members;
+		if (!this.cache.members.has(groupId)) {
+			logger.info('Fetching group members from Outline', { groupId });
+			const members = await this._outlineList('/api/groups.memberships', { id: groupId }, 'users');
+			logger.info('Group members fetched', { groupId, count: members.length });
+			this.cache.members.set(groupId, new Map(members.map((m) => [m.id, m])));
+		}
+		return [...this.cache.members.get(groupId).values()];
 	}
 
 	/**
@@ -265,7 +268,8 @@ class OutlineSync {
 		const res = await this.outline.post('/api/groups.create', { name });
 		const group = res.data.data;
 		logger.info('Group created', { name, id: group.id });
-		this.cache.groups = null;
+		this.cache.groups?.push(group);
+		this.cache.members.set(group.id, new Map());
 		return group;
 	}
 
@@ -277,7 +281,8 @@ class OutlineSync {
 	async deleteGroup(id, name) {
 		await this.outline.post('/api/groups.delete', { id });
 		logger.info('Group deleted', { name, id });
-		this.cache.groups = null;
+		if (this.cache.groups) this.cache.groups = this.cache.groups.filter((g) => g.id !== id);
+		this.cache.members.delete(id);
 	}
 
 	/**
@@ -289,10 +294,11 @@ class OutlineSync {
 	async addUserToGroup(userId, groupId) {
 		const members = await this.getGroupMembers(groupId);
 		if (members.some((m) => m.id === userId)) {
-			logger.info('User already in group', { userId, groupId });
+			logger.debug('User already in group', { userId, groupId });
 			return false;
 		}
 		await this.outline.post('/api/groups.add_user', { id: groupId, userId });
+		this.cache.members.get(groupId).set(userId, { id: userId });
 		return true;
 	}
 
@@ -300,9 +306,14 @@ class OutlineSync {
 	 * Remove user from Outline group
 	 * @param {string} userId
 	 * @param {string} groupId
+	 * @returns {boolean} - true if removed, false if not a member
 	 */
 	async removeUserFromGroup(userId, groupId) {
+		const members = await this.getGroupMembers(groupId);
+		if (!members.some((m) => m.id === userId)) return false;
 		await this.outline.post('/api/groups.remove_user', { id: groupId, userId });
+		this.cache.members.get(groupId).delete(userId);
+		return true;
 	}
 
 	/**
@@ -314,7 +325,7 @@ class OutlineSync {
 		const res = await this.outline.post('/api/collections.create', { name, permission: 'read', private: false });
 		const collection = res.data.data;
 		logger.info('Collection created', { name, id: collection.id });
-		this.cache.collections = null;
+		this.cache.collections?.push(collection);
 		return collection;
 	}
 
@@ -326,7 +337,7 @@ class OutlineSync {
 	async deleteCollection(id, name) {
 		await this.outline.post('/api/collections.delete', { id });
 		logger.info('Collection deleted', { name, id });
-		this.cache.collections = null;
+		if (this.cache.collections) this.cache.collections = this.cache.collections.filter((c) => c.id !== id);
 	}
 
 	/**
@@ -696,15 +707,15 @@ class OutlineSync {
 	 * Sync collections based on groups
 	 */
 	async syncCollections() {
-		const groups = await this.getGroups(true);
-		const collections = await this.getCollections(true);
+		const groups = await this.getGroups();
+		const collections = [...(await this.getCollections())];
 
 		logger.info('Starting collection synchronization', { groups: groups.length, collections: collections.length });
 
 		const groupNames = new Set(groups.filter((g) => g.name.toLowerCase() !== this.ADMIN_GROUP.toLowerCase()).map((g) => g.name.toLowerCase()));
 		const stats = { created: 0, linked: 0, deleted: 0 };
 
-		for (const group of groups) {
+		for (const group of [...groups]) {
 			if (group.name.toLowerCase() === this.ADMIN_GROUP.toLowerCase()) continue;
 
 			let collection = await this.findCollection(group.name);
