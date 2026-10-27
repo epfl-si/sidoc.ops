@@ -21,7 +21,8 @@ const MAX_CONSECUTIVE_EPFL_ERRORS = 5;
  * Handles user/group sync, admin sync, collections sync, and sidoc.readwrite authorizations
  *
  * Users are matched to the EPFL directory by SCIPER: each Outline user is resolved once
- * (see epflFindPersonForEmail) and the result is shared by the following steps.
+ * (see epflFindPersonForEmail), then accreditations, authorizations and admin rights
+ * are all expressed as SCIPERs and mapped back to Outline users.
  *
  * Optional environment:
  *   OUTLINE_SSO_EMAIL_DOMAIN=epfl.ch   domain of the SSO e-mail, used to match accounts by username
@@ -218,18 +219,6 @@ class OutlineSync {
 	}
 
 	/**
-	 * Find Outline user by email
-	 * @param {string} email
-	 * @returns {object|null}
-	 */
-	async findUser(email) {
-		const users = await this.getUsers();
-		const user = users.find((u) => u.email.toLowerCase() === email.toLowerCase()) || null;
-		logger.info('User lookup', { email, found: !!user });
-		return user;
-	}
-
-	/**
 	 * Find Outline group by name
 	 * @param {string} name
 	 * @returns {object|null}
@@ -365,22 +354,14 @@ class OutlineSync {
 	}
 
 	/**
-	 * Set user admin role
-	 * @param {string} userId
-	 * @param {string} email
-	 * @param {boolean} isAdmin
-	 * @returns {boolean} - true if changed, false if no change needed
+	 * Set user role
+	 * @param {object} user - Outline user (its cached role is updated)
+	 * @param {string} role - 'admin' or 'viewer'
 	 */
-	async setUserAdmin(userId, email, isAdmin) {
-		logger.info('Fetching user info from Outline', { userId, email });
-		const res = await this.outline.post('/api/users.info', { id: userId });
-		const current = res.data.data.role;
-		logger.info('User info fetched', { userId, email, currentRole: current });
-		const target = isAdmin ? 'admin' : 'viewer';
-		if ((isAdmin && current === 'admin') || (!isAdmin && current !== 'admin')) return false;
-		await this.outline.post('/api/users.update_role', { id: userId, role: target });
-		logger.info(isAdmin ? 'User promoted to admin' : 'Admin role removed', { email, userId });
-		return true;
+	async setUserRole(user, role) {
+		await this.outline.post('/api/users.update_role', { id: user.id, role });
+		user.role = role;
+		logger.info(role === 'admin' ? 'User promoted to admin' : 'Admin role removed', { email: user.email, userId: user.id });
 	}
 
 	/**
@@ -680,51 +661,50 @@ class OutlineSync {
 	 * Sync admin users
 	 */
 	async syncAdmins() {
+		const users = await this.getUsers();
 		const epflAdmins = await this.epflGetGroupMembers(process.env.OUTLINE_ADMIN_GROUP);
-		const adminEmails = new Set(epflAdmins.map((a) => a.email.toLowerCase()));
+		const adminScipers = new Set(epflAdmins.map((a) => Number(a.id)));
 
 		let adminGroup = await this.findGroup(this.ADMIN_GROUP);
 		if (!adminGroup) adminGroup = await this.createGroup(this.ADMIN_GROUP);
 
-		const allUsers = await this.getUsers();
-		const currentAdmins = (await this._outlineList('/api/users.list', { role: 'admin' })).filter((u) => (u.email || '').toLowerCase() !== this.ADMIN_EMAIL);
-
-		logger.info('Starting admin synchronization', { epflAdmins: epflAdmins.length, currentAdmins: currentAdmins.length });
+		logger.info('Starting admin synchronization', { epflAdmins: epflAdmins.length, currentAdmins: users.filter((u) => u.role === 'admin').length });
 
 		const stats = { promoted: 0, demoted: 0, addedToGroup: 0, removedFromGroup: 0 };
+		const wanted = new Set();
+		const foundScipers = new Set();
+
+		for (const user of users) {
+			const identity = this.identities.get(user.id);
+			if (identity.status !== 'resolved') continue;
+			foundScipers.add(identity.sciper);
+			if (adminScipers.has(identity.sciper)) wanted.add(user.id);
+		}
 
 		for (const admin of epflAdmins) {
-			const user = await this.findUser(admin.email);
-			if (!user) {
-				logger.warn('Admin not found in Outline', { email: admin.email });
-				continue;
-			}
-
-			const added = await this.addUserToGroup(user.id, adminGroup.id);
-			if (added) {
-				logger.info('Admin added to group', { email: admin.email });
-				stats.addedToGroup++;
-			}
-
-			const promoted = await this.setUserAdmin(user.id, admin.email, true);
-			if (promoted) stats.promoted++;
+			if (!foundScipers.has(Number(admin.id))) logger.warn('Admin not found in Outline', { sciper: admin.id });
 		}
 
-		for (const admin of currentAdmins) {
-			if (!adminEmails.has(admin.email.toLowerCase())) {
-				await this.setUserAdmin(admin.id, admin.email, false);
-				await this.removeUserFromGroup(admin.id, adminGroup.id);
-				logger.info('Admin demoted', { email: admin.email });
+		for (const user of users) {
+			if (this.identities.get(user.id).status !== 'resolved') continue;
+
+			if (wanted.has(user.id)) {
+				if (await this.addUserToGroup(user.id, adminGroup.id)) stats.addedToGroup++;
+				if (user.role !== 'admin') {
+					await this.setUserRole(user, 'admin');
+					stats.promoted++;
+				}
+			} else if (user.role === 'admin') {
+				await this.setUserRole(user, 'viewer');
 				stats.demoted++;
-				stats.removedFromGroup++;
 			}
 		}
 
-		const members = await this.getGroupMembers(adminGroup.id);
-		for (const member of members) {
-			const user = allUsers.find((u) => u.id === member.id);
-			if (user && !adminEmails.has(user.email.toLowerCase())) {
-				await this.removeUserFromGroup(member.id, adminGroup.id);
+		const usersById = new Map(users.map((u) => [u.id, u]));
+		for (const member of await this.getGroupMembers(adminGroup.id)) {
+			const user = usersById.get(member.id);
+			if (!user || wanted.has(user.id) || !['resolved', 'suspended'].includes(this.identities.get(user.id).status)) continue;
+			if (await this.removeUserFromGroup(member.id, adminGroup.id)) {
 				logger.info('User removed from admin group', { email: user.email });
 				stats.removedFromGroup++;
 			}
