@@ -13,6 +13,7 @@ const logger = {
 	debug: (msg, data) => process.env.DEBUG === 'true' && logger._log('DEBUG', msg, data),
 };
 
+const AUTHORIZATION_ID = 'sidoc.readwrite';
 const MAX_CONSECUTIVE_EPFL_ERRORS = 5;
 
 /**
@@ -86,7 +87,7 @@ class OutlineSync {
 	}
 
 	_initCache() {
-		this.cache = { users: null, groups: null, collections: null, allowedUnits: null, members: new Map() };
+		this.cache = { users: null, groups: null, collections: null, allowedUnits: null, authorizations: null, members: new Map() };
 		this.identities = null;
 	}
 
@@ -458,15 +459,23 @@ class OutlineSync {
 	}
 
 	/**
-	 * Get sidoc.readwrite authorizations from EPFL API
+	 * Get sidoc.readwrite authorizations on allowed units from EPFL API (cached)
 	 * @returns {Array}
 	 */
-	async epflGetAuthorizations() {
-		logger.info('Fetching sidoc.readwrite authorizations from EPFL API');
-		const res = await this._retry(() => this.epfl.get('/authorizations', { params: { authid: 'sidoc.readwrite', type: 'right' } }));
+	async getValidAuthorizations() {
+		if (this.cache.authorizations) return this.cache.authorizations;
+
+		logger.info(`Fetching ${AUTHORIZATION_ID} authorizations from EPFL API`);
+		const res = await this._retry(() => this.epfl.get('/authorizations', { params: { authid: AUTHORIZATION_ID, type: 'right' } }));
 		const auths = res.data.authorizations || [];
-		logger.info('Authorizations fetched from EPFL', { count: auths.length });
-		return auths;
+		const allowedUnits = await this.getAllowedUnits();
+
+		this.cache.authorizations = auths.filter((a) => {
+			const unit = a.reason?.resource?.name;
+			return unit && this.isUnitAllowed(unit, allowedUnits);
+		});
+		logger.info('Authorizations fetched from EPFL', { total: auths.length, valid: this.cache.authorizations.length });
+		return this.cache.authorizations;
 	}
 
 	/**
@@ -549,7 +558,32 @@ class OutlineSync {
 	}
 
 	/**
+	 * Sync the EPFL group that grants access to everyone holding the authorization
+	 */
+	async syncAccessGroup() {
+		if (!this.ACCESS_GROUP) return;
+
+		const authorized = new Set((await this.getValidAuthorizations()).map((a) => Number(a.persid)));
+		const existing = new Set((await this.epflGetGroupMembers(this.ACCESS_GROUP)).map((m) => Number(m.id)));
+		const toAdd = [...authorized].filter((s) => !existing.has(s));
+		const toRemove = [...existing].filter((s) => !authorized.has(s));
+
+		logger.info('Syncing EPFL externals group', {
+			group: this.ACCESS_GROUP,
+			existing: existing.size,
+			authorized: authorized.size,
+			toAdd: toAdd.length,
+			toRemove: toRemove.length,
+		});
+
+		if (toAdd.length) await this.epflAddToGroup(toAdd, this.ACCESS_GROUP);
+		for (const sciper of toRemove) await this.epflRemoveFromGroup(sciper, this.ACCESS_GROUP);
+	}
+
+	/**
 	 * Sync unit groups: members are the users accredited in the unit
+	 * plus those holding the sidoc.readwrite authorization on it.
+	 * Both sources are merged first, then the groups are diffed once.
 	 */
 	async syncGroups() {
 		const users = await this.getUsers();
@@ -565,6 +599,7 @@ class OutlineSync {
 
 		// users whose memberships are known well enough to be added to *and* removed from groups
 		const managed = new Set();
+		const userIdsBySciper = new Map();
 
 		for (const user of users) {
 			const identity = this.identities.get(user.id);
@@ -572,11 +607,26 @@ class OutlineSync {
 				managed.add(user.id);
 			} else if (identity.status === 'resolved') {
 				managed.add(user.id);
+				if (!userIdsBySciper.has(identity.sciper)) userIdsBySciper.set(identity.sciper, []);
+				userIdsBySciper.get(identity.sciper).push(user.id);
 				for (const unit of identity.units) want(unit.name, user.id);
 			}
 		}
 
-		const stats = { groupsCreated: 0, groupsDeleted: 0, added: 0, removed: 0 };
+		// A person who never logged in has no Outline account yet: they join once they do
+		const withoutAccount = new Set();
+		for (const auth of await this.getValidAuthorizations()) {
+			const sciper = Number(auth.persid);
+			const userIds = userIdsBySciper.get(sciper);
+			if (!userIds) {
+				withoutAccount.add(sciper);
+				logger.debug('Authorized user not found in Outline', { sciper });
+				continue;
+			}
+			for (const userId of userIds) want(auth.reason.resource.name, userId);
+		}
+
+		const stats = { groupsCreated: 0, groupsDeleted: 0, added: 0, removed: 0, authorizedWithoutAccount: withoutAccount.size };
 		const usersById = new Map(users.map((u) => [u.id, u]));
 
 		for (const { name, userIds } of desired.values()) {
@@ -624,93 +674,6 @@ class OutlineSync {
 		}
 
 		logger.info('Group synchronization completed', stats);
-	}
-
-	/**
-	 * Sync users with sidoc.readwrite authorization
-	 */
-	async syncAuthorizedUsers() {
-		const allowedUnits = await this.getAllowedUnits();
-		const auths = await this.epflGetAuthorizations();
-
-		logger.info('Starting authorized users synchronization', { authorizations: auths.length });
-
-		const validAuths = auths.filter((a) => {
-			const unit = a.reason?.resource?.name;
-			return unit && this.isUnitAllowed(unit, allowedUnits);
-		});
-
-		logger.info('Filtered authorizations', { total: auths.length, valid: validAuths.length });
-
-		const byUnit = new Map();
-		const allScipers = new Set();
-
-		for (const auth of validAuths) {
-			const unit = auth.reason.resource.name;
-			const sciper = Number(auth.persid);
-			if (!byUnit.has(unit)) byUnit.set(unit, new Set());
-			byUnit.get(unit).add(sciper);
-			allScipers.add(sciper);
-		}
-
-		if (this.ACCESS_GROUP) {
-			const existing = (await this.epflGetGroupMembers(this.ACCESS_GROUP)).map((m) => Number(m.id));
-			const authorized = [...allScipers];
-			const toAdd = authorized.filter((s) => !existing.includes(s));
-			const toRemove = existing.filter((s) => !authorized.includes(s));
-
-			logger.info('Syncing EPFL externals group', {
-				group: this.ACCESS_GROUP,
-				existing: existing.length,
-				authorized: authorized.length,
-				toAdd: toAdd.length,
-				toRemove: toRemove.length,
-			});
-
-			if (toAdd.length) await this.epflAddToGroup(toAdd, this.ACCESS_GROUP);
-			for (const sciper of toRemove) await this.epflRemoveFromGroup(sciper, this.ACCESS_GROUP);
-		}
-
-		const stats = { groupsCreated: 0, added: 0 };
-
-		for (const [unit, scipers] of byUnit) {
-			const outlineUsers = [];
-			for (const sciper of scipers) {
-				const person = await this.epflGetPerson(sciper);
-				if (!person?.email) {
-					logger.warn('Could not retrieve email for authorized user', { sciper });
-					continue;
-				}
-
-				const user = await this.findUser(person.email);
-				if (user) {
-					outlineUsers.push({ user, email: person.email });
-				} else {
-					logger.debug('Authorized user not found in Outline', { email: person.email, sciper });
-				}
-			}
-
-			if (!outlineUsers.length) {
-				logger.debug('No Outline users for unit, skipping', { unit });
-				continue;
-			}
-
-			let group = await this.findGroup(unit);
-			if (!group) {
-				group = await this.createGroup(unit);
-				stats.groupsCreated++;
-			}
-
-			for (const { user, email } of outlineUsers) {
-				const added = await this.addUserToGroup(user.id, group.id);
-				if (added) {
-					stats.added++;
-					logger.info('Authorized user added to group', { email, group: unit });
-				}
-			}
-		}
-
-		logger.info('Authorized users synchronization completed', { units: byUnit.size, users: allScipers.size, ...stats });
 	}
 
 	/**
@@ -819,11 +782,11 @@ class OutlineSync {
 		logger.info('Starting user synchronization process');
 		await this.syncUsers();
 
+		logger.info('Starting EPFL access group synchronization process');
+		await this.syncAccessGroup();
+
 		logger.info('Starting group synchronization process');
 		await this.syncGroups();
-
-		logger.info('Starting authorized users synchronization process');
-		await this.syncAuthorizedUsers();
 
 		logger.info('Starting admin synchronization process');
 		await this.syncAdmins();
