@@ -25,6 +25,8 @@ const MAX_CONSECUTIVE_EPFL_ERRORS = 5;
  * are all expressed as SCIPERs and mapped back to Outline users.
  *
  * Optional environment:
+ *   MAX_SUSPENSIONS=5                  suspend nobody if more users than this would be suspended in one run
+ *   FORCE_SUSPEND=true                 ignore MAX_SUSPENSIONS
  *   OUTLINE_SSO_EMAIL_DOMAIN=epfl.ch   domain of the SSO e-mail, used to match accounts by username
  *   OUTLINE_TLS_INSECURE=true          skip TLS verification for the Outline API
  */
@@ -99,6 +101,11 @@ class OutlineSync {
 		this.ALLOWED_COLLECTIONS = (process.env.OUTLINE_ALLOWED_COLLECTIONS || 'welcome').split(',').map((s) => s.toLowerCase());
 		this.ACCESS_GROUP = process.env.EPFL_ACCESS_GROUP;
 		this.SSO_EMAIL_DOMAIN = (process.env.OUTLINE_SSO_EMAIL_DOMAIN || 'epfl.ch').toLowerCase();
+		this.FORCE_SUSPEND = process.env.FORCE_SUSPEND === 'true';
+		this.MAX_SUSPENSIONS = Number.parseInt(process.env.MAX_SUSPENSIONS || '5', 10);
+		if (!Number.isInteger(this.MAX_SUSPENSIONS) || this.MAX_SUSPENSIONS < 0) {
+			throw new Error('MAX_SUSPENSIONS must be a non-negative integer');
+		}
 	}
 
 	/**
@@ -541,18 +548,31 @@ class OutlineSync {
 
 	/**
 	 * Suspend users that no longer exist at EPFL
+	 * Nobody is suspended if there are more than MAX_SUSPENSIONS of them (unless FORCE_SUSPEND),
+	 * as that points to a lookup problem rather than to people who actually left.
 	 */
 	async syncUsers() {
 		const users = await this.getUsers();
 		const missing = users.filter((u) => this.identities.get(u.id).status === 'missing');
 		const stats = { missing: missing.length, suspended: 0, held: 0 };
 
-		for (const user of missing) {
-			logger.warn('User no longer exists in EPFL, suspending', { email: user.email, userId: user.id });
-			const done = await this._attempt('Suspend user', { email: user.email }, () => this.suspendUser(user.id, user.email).then(() => true));
-			this.identities.get(user.id).status = done ? 'suspended' : 'held';
-			if (done) stats.suspended++;
-			else stats.held++;
+		if (missing.length > this.MAX_SUSPENSIONS && !this.FORCE_SUSPEND) {
+			logger.error('Too many users to suspend, suspending nobody (set FORCE_SUSPEND=true to override)', {
+				count: missing.length,
+				max: this.MAX_SUSPENSIONS,
+				emails: missing.map((u) => u.email),
+			});
+			this.failures++;
+			for (const user of missing) this.identities.get(user.id).status = 'held';
+			stats.held = missing.length;
+		} else {
+			for (const user of missing) {
+				logger.warn('User no longer exists in EPFL, suspending', { email: user.email, userId: user.id });
+				const done = await this._attempt('Suspend user', { email: user.email }, () => this.suspendUser(user.id, user.email).then(() => true));
+				this.identities.get(user.id).status = done ? 'suspended' : 'held';
+				if (done) stats.suspended++;
+				else stats.held++;
+			}
 		}
 
 		logger.info('User synchronization completed', stats);
@@ -786,7 +806,10 @@ class OutlineSync {
 	 * @returns {boolean} - false if anything went wrong
 	 */
 	async run() {
-		logger.info('Starting synchronization');
+		logger.info('Starting synchronization', {
+			maxSuspensions: this.MAX_SUSPENSIONS,
+			forceSuspend: this.FORCE_SUSPEND,
+		});
 
 		const failedSteps = [];
 		const step = async (name, fn) => {
