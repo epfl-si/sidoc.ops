@@ -91,30 +91,45 @@ class OutlineSync {
 	}
 
 	/**
+	 * Run a read request, retrying on network errors, 429 and 5xx
+	 * @param {Function} fn - Request to run
+	 * @param {number} attempts - Maximum number of attempts
+	 */
+	async _retry(fn, attempts = 3) {
+		for (let attempt = 1; ; attempt++) {
+			try {
+				return await fn();
+			} catch (err) {
+				const status = err.response?.status;
+				const retryable = err.isAxiosError && (!status || status === 429 || status >= 500);
+				if (!retryable || attempt >= attempts) throw err;
+				logger.warn('Request failed, retrying', { attempt, status, message: err.message });
+				await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+			}
+		}
+	}
+
+	/**
 	 * Make paginated POST request to Outline API
+	 * Outline returns either a plain array (users.list, collections.list) or an object holding
+	 * the list under a key next to its raw memberships (groups.list, groups.memberships,
+	 * collections.group_memberships), hence the key.
 	 * @param {string} endpoint - API endpoint
 	 * @param {object} data - Request data
+	 * @param {string} key - Key of the list when the response is an object
 	 * @returns {Array} - All results
 	 */
-	async _outlinePost(endpoint, data = {}) {
-		let results = [];
-		let offset = 0;
+	async _outlineList(endpoint, data = {}, key = null) {
 		const limit = 100;
-		let total = null;
+		const results = [];
 
-		do {
-			const res = await this.outline.post(endpoint, { ...data, limit, offset });
-			const pageData = res.data.data || [];
-			results = results.concat(pageData);
-
-			const pagination = res.data.pagination;
-			if (pagination) {
-				total = pagination.total;
-				offset += limit;
-			} else {
-				break;
-			}
-		} while (total !== null && results.length < total);
+		for (let offset = 0; ; offset += limit) {
+			const res = await this._retry(() => this.outline.post(endpoint, { ...data, limit, offset }));
+			const payload = res.data.data;
+			const page = Array.isArray(payload) ? payload : (key && payload?.[key]) || [];
+			results.push(...page);
+			if (page.length < limit) break;
+		}
 
 		return results;
 	}
@@ -127,7 +142,7 @@ class OutlineSync {
 	async getUsers(refresh = false) {
 		if (!this.cache.users || refresh) {
 			logger.info('Fetching users from Outline API');
-			const all = await this._outlinePost('/api/users.list');
+			const all = await this._outlineList('/api/users.list');
 			this.cache.users = all.filter((u) => u.email !== this.ADMIN_EMAIL);
 			logger.info('Users fetched and cached', { count: this.cache.users.length });
 		}
@@ -142,8 +157,7 @@ class OutlineSync {
 	async getGroups(refresh = false) {
 		if (!this.cache.groups || refresh) {
 			logger.info('Fetching groups from Outline API');
-			const raw = await this._outlinePost('/api/groups.list');
-			this.cache.groups = raw.flatMap((d) => d.groups || d);
+			this.cache.groups = await this._outlineList('/api/groups.list', {}, 'groups');
 			logger.info('Groups fetched and cached', { count: this.cache.groups.length });
 		}
 		return this.cache.groups;
@@ -157,7 +171,7 @@ class OutlineSync {
 	async getCollections(refresh = false) {
 		if (!this.cache.collections || refresh) {
 			logger.info('Fetching collections from Outline API');
-			this.cache.collections = await this._outlinePost('/api/collections.list');
+			this.cache.collections = await this._outlineList('/api/collections.list');
 			logger.info('Collections fetched and cached', { count: this.cache.collections.length });
 		}
 		return this.cache.collections;
@@ -237,8 +251,7 @@ class OutlineSync {
 	 */
 	async getGroupMembers(groupId) {
 		logger.info('Fetching group members from Outline', { groupId });
-		const raw = await this._outlinePost('/api/groups.memberships', { id: groupId });
-		const members = raw.flatMap((item) => item.users || []);
+		const members = await this._outlineList('/api/groups.memberships', { id: groupId }, 'users');
 		logger.info('Group members fetched', { groupId, count: members.length });
 		return members;
 	}
@@ -323,9 +336,7 @@ class OutlineSync {
 	 * @returns {boolean} - true if linked, false if already linked
 	 */
 	async addGroupToCollection(groupId, collectionId) {
-		logger.info('Fetching collection group memberships', { collectionId });
-		const raw = await this._outlinePost('/api/collections.group_memberships', { id: collectionId });
-		const existing = raw.flatMap((item) => item.groups || []);
+		const existing = await this._outlineList('/api/collections.group_memberships', { id: collectionId }, 'groups');
 		logger.info('Collection group memberships fetched', { collectionId, count: existing.length });
 		if (existing.some((g) => g.id === groupId)) return false;
 		await this.outline.post('/api/collections.add_group', { id: collectionId, groupId, permission: 'read_write' });
@@ -370,7 +381,7 @@ class OutlineSync {
 	async epflGetPerson(identifier) {
 		logger.info('Fetching person from EPFL API', { identifier });
 		try {
-			const res = await this.epfl.get(`/persons/${identifier}`);
+			const res = await this._retry(() => this.epfl.get(`/persons/${identifier}`));
 			logger.info('Person fetched from EPFL', { identifier, email: res.data.email });
 			return res.data;
 		} catch (err) {
@@ -391,7 +402,7 @@ class OutlineSync {
 		const person = await this.epflGetPerson(email);
 		if (!person) return null;
 		logger.info('Fetching units for user from EPFL', { email, persid: person.id });
-		const res = await this.epfl.get(`/units?persid=${person.id}`);
+		const res = await this._retry(() => this.epfl.get(`/units?persid=${person.id}`));
 		const units = res.data.units || [];
 		logger.info('User units fetched from EPFL', { email, count: units.length });
 		return units;
@@ -404,7 +415,7 @@ class OutlineSync {
 	 */
 	async epflGetGroupMembers(group) {
 		logger.info('Fetching group members from EPFL API', { group });
-		const res = await this.epfl.get(`/groups/${group}/members?recursive=1`);
+		const res = await this._retry(() => this.epfl.get(`/groups/${group}/members?recursive=1`));
 		const members = (res.data.members || []).filter((m) => m.type === 'person');
 		logger.info('EPFL group members fetched', { group, count: members.length });
 		return members;
@@ -416,7 +427,7 @@ class OutlineSync {
 	 */
 	async epflGetAuthorizations() {
 		logger.info('Fetching sidoc.readwrite authorizations from EPFL API');
-		const res = await this.epfl.get('/authorizations', { params: { authid: 'sidoc.readwrite', type: 'right' } });
+		const res = await this._retry(() => this.epfl.get('/authorizations', { params: { authid: 'sidoc.readwrite', type: 'right' } }));
 		const auths = res.data.authorizations || [];
 		logger.info('Authorizations fetched from EPFL', { count: auths.length });
 		return auths;
@@ -635,7 +646,7 @@ class OutlineSync {
 		if (!adminGroup) adminGroup = await this.createGroup(this.ADMIN_GROUP);
 
 		const allUsers = await this.getUsers();
-		const currentAdmins = (await this._outlinePost('/api/users.list', { role: 'admin' })).filter((u) => u.email !== this.ADMIN_EMAIL);
+		const currentAdmins = (await this._outlineList('/api/users.list', { role: 'admin' })).filter((u) => u.email !== this.ADMIN_EMAIL);
 
 		logger.info('Starting admin synchronization', { epflAdmins: epflAdmins.length, currentAdmins: currentAdmins.length });
 
