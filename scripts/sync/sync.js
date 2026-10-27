@@ -90,6 +90,7 @@ class OutlineSync {
 	_initCache() {
 		this.cache = { users: null, groups: null, collections: null, allowedUnits: null, authorizations: null, members: new Map() };
 		this.identities = null;
+		this.failures = 0;
 	}
 
 	_initConfig() {
@@ -142,6 +143,23 @@ class OutlineSync {
 		}
 
 		return results;
+	}
+
+	/**
+	 * Run a single write: a failure is logged and counted instead of aborting the whole sync
+	 * @param {string} label - What is being done
+	 * @param {object} data - Context for the error log
+	 * @param {Function} fn - The write
+	 * @returns {*} - Result of fn, undefined if it failed
+	 */
+	async _attempt(label, data, fn) {
+		try {
+			return await fn();
+		} catch (err) {
+			this.failures++;
+			logger.error(`${label} failed`, { ...data, message: err.message });
+			return undefined;
+		}
 	}
 
 	/**
@@ -508,6 +526,7 @@ class OutlineSync {
 				consecutiveErrors = 0;
 			} catch (err) {
 				identities.set(user.id, { status: 'error' });
+				this.failures++;
 				logger.error('Could not resolve user, leaving untouched', { email: user.email, message: err.message });
 				if (++consecutiveErrors >= MAX_CONSECUTIVE_EPFL_ERRORS) {
 					throw new Error(`EPFL API unreachable: ${consecutiveErrors} consecutive failures`);
@@ -526,13 +545,14 @@ class OutlineSync {
 	async syncUsers() {
 		const users = await this.getUsers();
 		const missing = users.filter((u) => this.identities.get(u.id).status === 'missing');
-		const stats = { missing: missing.length, suspended: 0 };
+		const stats = { missing: missing.length, suspended: 0, held: 0 };
 
 		for (const user of missing) {
 			logger.warn('User no longer exists in EPFL, suspending', { email: user.email, userId: user.id });
-			await this.suspendUser(user.id, user.email);
-			this.identities.get(user.id).status = 'suspended';
-			stats.suspended++;
+			const done = await this._attempt('Suspend user', { email: user.email }, () => this.suspendUser(user.id, user.email).then(() => true));
+			this.identities.get(user.id).status = done ? 'suspended' : 'held';
+			if (done) stats.suspended++;
+			else stats.held++;
 		}
 
 		logger.info('User synchronization completed', stats);
@@ -557,8 +577,10 @@ class OutlineSync {
 			toRemove: toRemove.length,
 		});
 
-		if (toAdd.length) await this.epflAddToGroup(toAdd, this.ACCESS_GROUP);
-		for (const sciper of toRemove) await this.epflRemoveFromGroup(sciper, this.ACCESS_GROUP);
+		if (toAdd.length) await this._attempt('Add users to EPFL group', { group: this.ACCESS_GROUP }, () => this.epflAddToGroup(toAdd, this.ACCESS_GROUP));
+		for (const sciper of toRemove) {
+			await this._attempt('Remove user from EPFL group', { group: this.ACCESS_GROUP, sciper }, () => this.epflRemoveFromGroup(sciper, this.ACCESS_GROUP));
+		}
 	}
 
 	/**
@@ -613,12 +635,14 @@ class OutlineSync {
 		for (const { name, userIds } of desired.values()) {
 			let group = await this.findGroup(name);
 			if (!group) {
-				group = await this.createGroup(name);
+				group = await this._attempt('Create group', { name }, () => this.createGroup(name));
+				if (!group) continue;
 				stats.groupsCreated++;
 			}
 
 			for (const userId of userIds) {
-				if (await this.addUserToGroup(userId, group.id)) {
+				const added = await this._attempt('Add user to group', { group: name, userId }, () => this.addUserToGroup(userId, group.id));
+				if (added) {
 					logger.info('User added to group', { email: usersById.get(userId).email, group: name });
 					stats.added++;
 				}
@@ -633,8 +657,8 @@ class OutlineSync {
 			const members = await this.getGroupMembers(group.id);
 
 			if (!wanted && members.length === 0) {
-				await this.deleteGroup(group.id, group.name);
-				stats.groupsDeleted++;
+				const deleted = await this._attempt('Delete group', { group: group.name }, () => this.deleteGroup(group.id, group.name).then(() => true));
+				if (deleted) stats.groupsDeleted++;
 				continue;
 			}
 
@@ -647,7 +671,8 @@ class OutlineSync {
 
 			for (const member of members) {
 				if (!managed.has(member.id) || wanted?.has(member.id)) continue;
-				if (await this.removeUserFromGroup(member.id, group.id)) {
+				const removed = await this._attempt('Remove user from group', { group: group.name, userId: member.id }, () => this.removeUserFromGroup(member.id, group.id));
+				if (removed) {
 					logger.info('User removed from group', { email: usersById.get(member.id)?.email, group: group.name });
 					stats.removed++;
 				}
@@ -689,14 +714,15 @@ class OutlineSync {
 			if (this.identities.get(user.id).status !== 'resolved') continue;
 
 			if (wanted.has(user.id)) {
-				if (await this.addUserToGroup(user.id, adminGroup.id)) stats.addedToGroup++;
+				const added = await this._attempt('Add admin to group', { email: user.email }, () => this.addUserToGroup(user.id, adminGroup.id));
+				if (added) stats.addedToGroup++;
 				if (user.role !== 'admin') {
-					await this.setUserRole(user, 'admin');
-					stats.promoted++;
+					const promoted = await this._attempt('Promote admin', { email: user.email }, () => this.setUserRole(user, 'admin').then(() => true));
+					if (promoted) stats.promoted++;
 				}
 			} else if (user.role === 'admin') {
-				await this.setUserRole(user, 'viewer');
-				stats.demoted++;
+				const demoted = await this._attempt('Demote admin', { email: user.email }, () => this.setUserRole(user, 'viewer').then(() => true));
+				if (demoted) stats.demoted++;
 			}
 		}
 
@@ -704,7 +730,8 @@ class OutlineSync {
 		for (const member of await this.getGroupMembers(adminGroup.id)) {
 			const user = usersById.get(member.id);
 			if (!user || wanted.has(user.id) || !['resolved', 'suspended'].includes(this.identities.get(user.id).status)) continue;
-			if (await this.removeUserFromGroup(member.id, adminGroup.id)) {
+			const removed = await this._attempt('Remove user from admin group', { email: user.email }, () => this.removeUserFromGroup(member.id, adminGroup.id));
+			if (removed) {
 				logger.info('User removed from admin group', { email: user.email });
 				stats.removedFromGroup++;
 			}
@@ -730,11 +757,12 @@ class OutlineSync {
 
 			let collection = await this.findCollection(group.name);
 			if (!collection) {
-				collection = await this.createCollection(group.name);
+				collection = await this._attempt('Create collection', { name: group.name }, () => this.createCollection(group.name));
+				if (!collection) continue;
 				stats.created++;
 			}
 
-			const linked = await this.addGroupToCollection(group.id, collection.id);
+			const linked = await this._attempt('Link group to collection', { group: group.name }, () => this.addGroupToCollection(group.id, collection.id));
 			if (linked) stats.linked++;
 		}
 
@@ -744,9 +772,8 @@ class OutlineSync {
 			if (this.ALLOWED_COLLECTIONS.includes(name)) continue;
 			if (groupNames.has(name)) continue;
 
-			await this.deleteCollection(collection.id, collection.name);
-			logger.info('Obsolete collection deleted', { collection: collection.name });
-			stats.deleted++;
+			const deleted = await this._attempt('Delete collection', { collection: collection.name }, () => this.deleteCollection(collection.id, collection.name).then(() => true));
+			if (deleted) stats.deleted++;
 		}
 
 		logger.info('Collection synchronization completed', stats);
@@ -754,27 +781,40 @@ class OutlineSync {
 
 	/**
 	 * Run full synchronization
+	 * Steps are independent: one failing does not stop the others, but steps relying on the
+	 * resolved identities are skipped if those are not available.
+	 * @returns {boolean} - false if anything went wrong
 	 */
 	async run() {
-		logger.info('Starting identity resolution process');
-		await this.resolveIdentities();
+		logger.info('Starting synchronization');
 
-		logger.info('Starting user synchronization process');
-		await this.syncUsers();
+		const failedSteps = [];
+		const step = async (name, fn) => {
+			logger.info(`Starting step: ${name}`);
+			try {
+				await fn();
+			} catch (error) {
+				failedSteps.push(name);
+				logger.error(`Step failed: ${name}`, { error: error.message, stack: error.stack });
+			}
+		};
 
-		logger.info('Starting EPFL access group synchronization process');
-		await this.syncAccessGroup();
+		await step('resolve identities', () => this.resolveIdentities());
+		if (this.identities) await step('users', () => this.syncUsers());
+		await step('access group', () => this.syncAccessGroup());
+		if (this.identities) {
+			await step('groups', () => this.syncGroups());
+			await step('admins', () => this.syncAdmins());
+		}
+		await step('collections', () => this.syncCollections());
 
-		logger.info('Starting group synchronization process');
-		await this.syncGroups();
-
-		logger.info('Starting admin synchronization process');
-		await this.syncAdmins();
-
-		logger.info('Starting collection synchronization process');
-		await this.syncCollections();
-
-		logger.info('Complete synchronization process finished successfully');
+		const ok = !failedSteps.length && !this.failures;
+		if (ok) {
+			logger.info('Complete synchronization process finished successfully');
+		} else {
+			logger.error('Synchronization finished with errors', { failedSteps, failures: this.failures });
+		}
+		return ok;
 	}
 }
 
@@ -782,7 +822,7 @@ async function main() {
 	let exitCode = 0;
 	try {
 		const sync = new OutlineSync();
-		await sync.run();
+		if (!(await sync.run())) exitCode = 1;
 	} catch (error) {
 		exitCode = 1;
 		logger.error('Synchronization failed', { error: error.message, stack: error.stack });
