@@ -16,6 +16,9 @@ const logger = {
 /**
  * OutlineSync - Synchronization utility for Outline Wiki
  * Handles user/group sync, admin sync, collections sync, and sidoc.readwrite authorizations
+ *
+ * Optional environment:
+ *   OUTLINE_TLS_INSECURE=true          skip TLS verification for the Outline API
  */
 class OutlineSync {
 	constructor() {
@@ -32,12 +35,13 @@ class OutlineSync {
 	}
 
 	_initClients() {
-		const agent = new https.Agent({ rejectUnauthorized: false });
+		const insecure = process.env.OUTLINE_TLS_INSECURE === 'true';
+		if (insecure) logger.warn('TLS verification is disabled for the Outline API');
 
 		this.outline = axios.create({
 			baseURL: process.env.OUTLINE_BASE_URL,
 			headers: { Authorization: `Bearer ${process.env.OUTLINE_API_TOKEN}`, 'Content-Type': 'application/json' },
-			httpsAgent: agent,
+			httpsAgent: insecure ? new https.Agent({ rejectUnauthorized: false }) : undefined,
 			timeout: 10000,
 		});
 
