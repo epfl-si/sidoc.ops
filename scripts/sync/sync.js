@@ -68,7 +68,8 @@ class OutlineSync {
 					if (error.response) {
 						logger.error(`${name} API Response Error`, { status: error.response.status, data: error.response.data });
 					} else if (error.request) {
-						logger.error(`${name} No Response Received`, { request: error.request });
+						// error.request is a circular socket object: never serialize it
+						logger.error(`${name} No Response Received`, { code: error.code, message: error.message });
 					} else {
 						logger.error(`${name} Request Setup Error`, { message: error.message });
 					}
