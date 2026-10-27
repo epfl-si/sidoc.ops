@@ -84,7 +84,7 @@ class OutlineSync {
 	}
 
 	_initConfig() {
-		this.ADMIN_EMAIL = process.env.OUTLINE_ADMIN_EMAIL || 'admin@epfl.ch';
+		this.ADMIN_EMAIL = (process.env.OUTLINE_ADMIN_EMAIL || 'admin@epfl.ch').toLowerCase();
 		this.ADMIN_GROUP = 'ADMINS';
 		this.ALLOWED_COLLECTIONS = (process.env.OUTLINE_ALLOWED_COLLECTIONS || 'welcome').split(',').map((s) => s.toLowerCase());
 		this.ACCESS_GROUP = process.env.EPFL_ACCESS_GROUP;
@@ -135,7 +135,7 @@ class OutlineSync {
 	}
 
 	/**
-	 * Get all Outline users (cached)
+	 * Get all Outline users (cached), without the technical admin account
 	 * @param {boolean} refresh - Force refresh cache
 	 * @returns {Array} - Users list
 	 */
@@ -143,7 +143,7 @@ class OutlineSync {
 		if (!this.cache.users || refresh) {
 			logger.info('Fetching users from Outline API');
 			const all = await this._outlineList('/api/users.list');
-			this.cache.users = all.filter((u) => u.email !== this.ADMIN_EMAIL);
+			this.cache.users = all.filter((u) => (u.email || '').toLowerCase() !== this.ADMIN_EMAIL);
 			logger.info('Users fetched and cached', { count: this.cache.users.length });
 		}
 		return this.cache.users;
@@ -646,7 +646,7 @@ class OutlineSync {
 		if (!adminGroup) adminGroup = await this.createGroup(this.ADMIN_GROUP);
 
 		const allUsers = await this.getUsers();
-		const currentAdmins = (await this._outlineList('/api/users.list', { role: 'admin' })).filter((u) => u.email !== this.ADMIN_EMAIL);
+		const currentAdmins = (await this._outlineList('/api/users.list', { role: 'admin' })).filter((u) => (u.email || '').toLowerCase() !== this.ADMIN_EMAIL);
 
 		logger.info('Starting admin synchronization', { epflAdmins: epflAdmins.length, currentAdmins: currentAdmins.length });
 
